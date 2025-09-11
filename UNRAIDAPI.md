@@ -1,8 +1,10 @@
-# Unraid API Documentation
+# Unraid GraphQL API Documentation
 
 ## Overview
 
-This document provides a comprehensive guide to the Unraid GraphQL API. The API allows developers to interact with various components of an Unraid server, including array management, disk operations, user administration, Docker containers, virtual machines, and more.
+This document provides a comprehensive guide to the modern Unraid GraphQL API (v4.21.0+). The API allows developers to interact with various components of an Unraid server, including array management, disk operations, user administration, Docker containers, virtual machines, notifications, and more.
+
+**This documentation is updated for the latest Unraid API schema and is compatible with Unraid 7.1.4+.**
 
 ## Table of Contents
 
@@ -24,35 +26,45 @@ This document provides a comprehensive guide to the Unraid GraphQL API. The API 
 
 ## Authentication
 
-The API uses API keys for authentication. You can create an API key using the `createApiKey` mutation:
+The API uses API keys for authentication. You can create an API key using the new mutation structure:
 
 ```graphql
 mutation {
-  createApiKey(input: {
-    name: "My API Key",
-    description: "API key for my application",
-    roles: [admin]
-  }) {
-    id
-    key
-    name
-    roles
+  apiKey {
+    create(input: {
+      name: "My API Key",
+      description: "API key for my application",
+      roles: [ADMIN]
+    }) {
+      id
+      key
+      name
+      roles
+      permissions
+    }
   }
 }
+```
+
+Include the API key in your requests as a header:
+
+```
+x-api-key: YOUR_API_KEY_HERE
 ```
 
 ## Core Resources
 
 ### Array Management
 
-The Unraid array is the core storage component of the system. The API provides operations to:
+The Unraid array is the core storage component of the system. The modern API provides comprehensive operations to:
 
-- Start and stop the array
-- Add and remove disks
-- Monitor array status
-- Perform parity checks
+- Start and stop the array using mutations
+- Add and remove disks from the array
+- Monitor detailed array status including all disk types
+- Perform parity checks with full control
+- Mount and unmount individual disks
 
-Example query to get array information:
+Example query to get comprehensive array information:
 
 ```graphql
 query {
@@ -64,17 +76,94 @@ query {
         used
         total
       }
+      disks {
+        free
+        used
+        total
+      }
+    }
+    boot {
+      id
+      name
+      device
+      size
+      temp
+      type
     }
     parities {
       id
       name
+      device
       size
+      status
+      type
     }
     disks {
       id
       name
+      device
       size
       status
+      type
+      temp
+      fsSize
+      fsFree
+      fsUsed
+      numReads
+      numWrites
+      numErrors
+    }
+    caches {
+      id
+      name
+      device
+      size
+      temp
+      status
+      type
+      fsSize
+      fsFree
+      fsUsed
+    }
+  }
+}
+```
+
+#### Array Control Mutations
+
+```graphql
+# Start the array
+mutation {
+  array {
+    setState(input: { desiredState: START }) {
+      state
+    }
+  }
+}
+
+# Stop the array
+mutation {
+  array {
+    setState(input: { desiredState: STOP }) {
+      state
+    }
+  }
+}
+
+# Add a disk to the array
+mutation {
+  array {
+    addDiskToArray(input: { diskId: "disk_id", slot: "disk1" }) {
+      state
+    }
+  }
+}
+
+# Remove a disk from the array
+mutation {
+  array {
+    removeDiskFromArray(input: { diskId: "disk_id" }) {
+      state
     }
   }
 }
@@ -82,23 +171,62 @@ query {
 
 ### Disk Operations
 
-The API allows detailed access to disk information and operations:
+The modern API provides comprehensive disk information and operations:
 
-- View detailed disk information (size, temperature, status)
-- Mount and unmount disks
-- Monitor disk statistics
+- View detailed disk information including hardware specs
+- Monitor SMART status and temperature
+- Access partition information
+- Check spinning status for HDDs
+- Mount and unmount individual disks
 
-Example query to get all disks:
+Example query to get comprehensive disk information:
 
 ```graphql
 query {
   disks {
+    id
     device
     name
+    type
     size
-    temperature
-    smartStatus
+    vendor
+    firmwareRevision
+    serialNum
     interfaceType
+    smartStatus
+    temperature
+    isSpinning
+    partitions {
+      name
+      fsType
+      size
+    }
+  }
+}
+```
+
+#### Individual Disk Query
+
+```graphql
+query {
+  disk(id: "disk_id") {
+    id
+    device
+    name
+    type
+    size
+    vendor
+    firmwareRevision
+    serialNum
+    interfaceType
+    smartStatus
+    temperature
+    isSpinning
+    partitions {
+      name
+      fsType
+      size
+    }
   }
 }
 ```
@@ -129,26 +257,57 @@ mutation {
 
 ### Docker Management
 
-Interact with Docker containers:
+The modern API provides comprehensive Docker container management:
 
-- View container information
-- Manage Docker networks
+- View detailed container information
+- Start and stop containers
+- Monitor container status and ports
+- Access container configuration
 
 Example to get all Docker containers:
 
 ```graphql
 query {
-  dockerContainers {
-    id
-    names
-    image
-    state
-    status
-    ports {
-      ip
-      privatePort
-      publicPort
-      type
+  docker {
+    containers {
+      id
+      names
+      image
+      state
+      status
+      autoStart
+      ports {
+        ip
+        privatePort
+        publicPort
+        type
+      }
+    }
+  }
+}
+```
+
+#### Docker Container Control
+
+```graphql
+# Start a container
+mutation {
+  docker {
+    start(id: "container_id") {
+      id
+      state
+      status
+    }
+  }
+}
+
+# Stop a container
+mutation {
+  docker {
+    stop(id: "container_id") {
+      id
+      state
+      status
     }
   }
 }
@@ -156,10 +315,12 @@ query {
 
 ### Virtual Machines
 
-Manage virtual machines running on Unraid:
+The modern API provides comprehensive virtual machine management:
 
-- View VM information
-- Check VM status
+- View detailed VM information
+- Start, stop, pause, and resume VMs
+- Force stop and reboot VMs
+- Monitor VM status
 
 Example to get all VMs:
 
@@ -167,6 +328,76 @@ Example to get all VMs:
 query {
   vms {
     domain {
+      uuid
+      name
+      state
+    }
+  }
+}
+```
+
+#### Virtual Machine Control
+
+```graphql
+# Start a VM
+mutation {
+  vm {
+    start(id: "vm_id") {
+      uuid
+      name
+      state
+    }
+  }
+}
+
+# Stop a VM
+mutation {
+  vm {
+    stop(id: "vm_id") {
+      uuid
+      name
+      state
+    }
+  }
+}
+
+# Force stop a VM
+mutation {
+  vm {
+    forceStop(id: "vm_id") {
+      uuid
+      name
+      state
+    }
+  }
+}
+
+# Pause a VM
+mutation {
+  vm {
+    pause(id: "vm_id") {
+      uuid
+      name
+      state
+    }
+  }
+}
+
+# Resume a VM
+mutation {
+  vm {
+    resume(id: "vm_id") {
+      uuid
+      name
+      state
+    }
+  }
+}
+
+# Reboot a VM
+mutation {
+  vm {
+    reboot(id: "vm_id") {
       uuid
       name
       state
@@ -208,6 +439,101 @@ mutation {
 }
 ```
 
+### UPS Monitoring
+
+The API provides comprehensive UPS monitoring capabilities:
+
+- Monitor UPS status and battery levels
+- Track power consumption and load
+- Get estimated runtime information
+- Monitor UPS health status
+
+Example to get UPS information:
+
+```graphql
+query {
+  upsDevices {
+    id
+    name
+    model
+    status
+    battery {
+      chargeLevel
+      estimatedRuntime
+      health
+    }
+    power {
+      inputVoltage
+      outputVoltage
+      loadPercentage
+    }
+  }
+}
+```
+
+Example to get UPS configuration:
+
+```graphql
+query {
+  upsConfiguration {
+    service
+    upsType
+    device
+    batteryLevel
+    minutes
+    timeout
+    modelName
+  }
+}
+```
+
+### Disk Sleep State Monitoring
+
+Monitor disk spinning status to optimize power consumption:
+
+- Check which disks are currently spinning or sleeping
+- Monitor disk temperatures
+- Identify rotational vs solid-state drives
+
+**Important**: Querying disk information may wake up sleeping disks. Use with caution if you want to preserve disk sleep states.
+
+Example to check disk sleep status:
+
+```graphql
+query {
+  array {
+    disks {
+      name
+      device
+      isSpinning
+      rotational
+      temp
+    }
+    parities {
+      name
+      device
+      isSpinning
+      rotational
+      temp
+    }
+    caches {
+      name
+      device
+      isSpinning
+      rotational
+      temp
+    }
+  }
+  disks {
+    name
+    device
+    isSpinning
+    temperature
+    type
+  }
+}
+```
+
 ## API Reference
 
 ### Queries
@@ -231,6 +557,9 @@ The API provides the following top-level queries:
 | `unassignedDevices` | Get unassigned devices |
 | `users(input: usersInput)` | Get all users |
 | `vms` | Get virtual machines |
+| `upsDevices` | Get all UPS devices |
+| `upsDeviceById(id: String!)` | Get a specific UPS device |
+| `upsConfiguration` | Get UPS configuration settings |
 
 ### Mutations
 

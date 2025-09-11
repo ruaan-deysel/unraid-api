@@ -133,11 +133,15 @@ class UnraidGraphQLClient:
                     uptime
                 }
                 cpu {
+                    id
                     manufacturer
                     brand
                     vendor
                     family
                     model
+                    stepping
+                    revision
+                    voltage
                     speed
                     speedmin
                     speedmax
@@ -146,17 +150,10 @@ class UnraidGraphQLClient:
                     processors
                     socket
                     cache
+                    flags
                 }
                 memory {
-                    total
-                    free
-                    used
-                    active
-                    available
-                    buffcache
-                    swaptotal
-                    swapused
-                    swapfree
+                    id
                     layout {
                         size
                         bank
@@ -178,15 +175,98 @@ class UnraidGraphQLClient:
                     serial
                 }
                 versions {
-                    unraid
-                    kernel
-                    docker
+                    id
+                    core {
+                        unraid
+                        api
+                        kernel
+                    }
+                    packages {
+                        openssl
+                        node
+                        npm
+                        pm2
+                        git
+                        nginx
+                        php
+                        docker
+                    }
                 }
             }
         }
         """
         return self.execute_query(query)
-    
+
+    def get_memory_utilization(self) -> Dict[str, Any]:
+        """Get memory layout and calculate total memory information."""
+        query = """
+        query {
+            info {
+                memory {
+                    layout {
+                        size
+                        bank
+                        type
+                        clockSpeed
+                        manufacturer
+                    }
+                }
+            }
+        }
+        """
+        result = self.execute_query(query)
+
+        # Calculate total memory from layout
+        if 'data' in result and 'info' in result['data'] and 'memory' in result['data']['info']:
+            layout = result['data']['info']['memory'].get('layout', [])
+            total_memory = sum(module.get('size', 0) for module in layout)
+
+            return {
+                'total': total_memory,
+                'layout': layout,
+                'modules_count': len(layout)
+            }
+
+        return result
+
+    def get_cpu_utilization(self) -> Dict[str, Any]:
+        """Get CPU information and specifications."""
+        query = """
+        query {
+            info {
+                cpu {
+                    manufacturer
+                    brand
+                    cores
+                    threads
+                    speed
+                    speedmax
+                    speedmin
+                    socket
+                    cache
+                }
+            }
+        }
+        """
+        result = self.execute_query(query)
+
+        # Extract CPU info for easier access
+        if 'data' in result and 'info' in result['data'] and 'cpu' in result['data']['info']:
+            cpu_info = result['data']['info']['cpu']
+            return {
+                'manufacturer': cpu_info.get('manufacturer'),
+                'brand': cpu_info.get('brand'),
+                'cores': cpu_info.get('cores'),
+                'threads': cpu_info.get('threads'),
+                'speed': cpu_info.get('speed'),
+                'speedmax': cpu_info.get('speedmax'),
+                'speedmin': cpu_info.get('speedmin'),
+                'socket': cpu_info.get('socket'),
+                'cache': cpu_info.get('cache', {})
+            }
+
+        return result
+
     def get_array_status(self) -> Dict[str, Any]:
         """Get detailed array status including all disk types."""
         query = """
@@ -225,6 +305,7 @@ class UnraidGraphQLClient:
                     temp
                     status
                     rotational
+                    isSpinning
                     type
                 }
                 disks {
@@ -236,6 +317,7 @@ class UnraidGraphQLClient:
                     type
                     temp
                     rotational
+                    isSpinning
                     fsSize
                     fsFree
                     fsUsed
@@ -251,6 +333,7 @@ class UnraidGraphQLClient:
                     temp
                     status
                     rotational
+                    isSpinning
                     fsSize
                     fsFree
                     fsUsed
@@ -288,62 +371,188 @@ class UnraidGraphQLClient:
     def start_docker_container(self, container_id: str) -> Dict[str, Any]:
         """
         Start a Docker container.
-        
+
         Args:
             container_id: The ID of the container to start
-            
-        Note:
-            This operation is not currently supported by the Unraid GraphQL API.
-            It is included for possible future API support.
         """
-        # This is a custom mutation that might be supported in future API versions
-        return {"error": "Docker container control operations are not currently supported by the Unraid GraphQL API"}
-    
+        mutation = """
+        mutation {
+            docker {
+                start(id: "%s") {
+                    id
+                    state
+                    status
+                }
+            }
+        }
+        """ % container_id
+        return self.execute_query(mutation)
+
     def stop_docker_container(self, container_id: str) -> Dict[str, Any]:
         """
         Stop a Docker container.
-        
+
         Args:
             container_id: The ID of the container to stop
-            
-        Note:
-            This operation is not currently supported by the Unraid GraphQL API.
-            It is included for possible future API support.
         """
-        # This is a custom mutation that might be supported in future API versions
-        return {"error": "Docker container control operations are not currently supported by the Unraid GraphQL API"}
-    
+        mutation = """
+        mutation {
+            docker {
+                stop(id: "%s") {
+                    id
+                    state
+                    status
+                }
+            }
+        }
+        """ % container_id
+        return self.execute_query(mutation)
+
     def restart_docker_container(self, container_id: str) -> Dict[str, Any]:
         """
         Restart a Docker container.
-        
+
         Args:
             container_id: The ID of the container to restart
-            
+
         Note:
-            This operation is not currently supported by the Unraid GraphQL API.
-            It is included for possible future API support.
+            This performs a stop followed by start operation.
         """
-        # This is a custom mutation that might be supported in future API versions
-        return {"error": "Docker container control operations are not currently supported by the Unraid GraphQL API"}
+        # Stop the container first
+        stop_result = self.stop_docker_container(container_id)
+        if "errors" in stop_result:
+            return stop_result
+
+        # Then start it
+        return self.start_docker_container(container_id)
     
     def get_disks_info(self) -> Dict[str, Any]:
         """Get detailed information about all disks."""
         query = """
         query {
             disks {
+                id
                 device
                 name
                 type
                 size
                 vendor
-                temperature
+                firmwareRevision
+                serialNum
+                interfaceType
                 smartStatus
+                temperature
+                partitions {
+                    name
+                    fsType
+                    size
+                }
+                isSpinning
             }
         }
         """
         return self.execute_query(query)
-    
+
+    def get_disk_sleep_status(self, include_array_disks: bool = True, include_unassigned_disks: bool = True) -> Dict[str, Any]:
+        """
+        Get disk sleep status for all disks.
+
+        Args:
+            include_array_disks: Include disks that are part of the array (data, parity, cache)
+            include_unassigned_disks: Include unassigned/standalone disks
+
+        Returns:
+            Dictionary with spinning and sleeping disk information
+
+        Note:
+            Querying disk information may wake up sleeping disks. Use with caution
+            if you want to preserve disk sleep states.
+        """
+        result = {
+            'spinning': [],
+            'sleeping': [],
+            'unknown': [],
+            'summary': {
+                'total_disks': 0,
+                'spinning_count': 0,
+                'sleeping_count': 0,
+                'unknown_count': 0
+            }
+        }
+
+        # Get array disks if requested
+        if include_array_disks:
+            array_result = self.get_array_status()
+            if 'data' in array_result and 'array' in array_result['data']:
+                array = array_result['data']['array']
+
+                # Process all disk types in the array
+                for disk_type in ['disks', 'parities', 'caches']:
+                    if disk_type in array:
+                        for disk in array[disk_type]:
+                            disk_info = {
+                                'name': disk.get('name', 'Unknown'),
+                                'device': disk.get('device', 'Unknown'),
+                                'type': disk_type.rstrip('s').upper(),  # 'disks' -> 'DISK', etc.
+                                'temperature': disk.get('temp'),
+                                'size': disk.get('size'),
+                                'location': 'array'
+                            }
+
+                            is_spinning = disk.get('isSpinning')
+                            if is_spinning is True:
+                                result['spinning'].append(disk_info)
+                                result['summary']['spinning_count'] += 1
+                            elif is_spinning is False:
+                                result['sleeping'].append(disk_info)
+                                result['summary']['sleeping_count'] += 1
+                            else:
+                                result['unknown'].append(disk_info)
+                                result['summary']['unknown_count'] += 1
+
+                            result['summary']['total_disks'] += 1
+
+        # Get unassigned disks if requested
+        if include_unassigned_disks:
+            disks_result = self.get_disks_info()
+            if 'data' in disks_result and 'disks' in disks_result['data']:
+                for disk in disks_result['data']['disks']:
+                    # Skip disks that are already counted in array
+                    device = disk.get('device', '').replace('/dev/', '')
+                    if include_array_disks:
+                        # Check if this disk is already in our results
+                        already_counted = any(
+                            d['device'] == device
+                            for disk_list in [result['spinning'], result['sleeping'], result['unknown']]
+                            for d in disk_list
+                        )
+                        if already_counted:
+                            continue
+
+                    disk_info = {
+                        'name': disk.get('name', 'Unknown'),
+                        'device': device,
+                        'type': disk.get('type', 'UNKNOWN'),
+                        'temperature': disk.get('temperature'),
+                        'size': disk.get('size'),
+                        'location': 'unassigned'
+                    }
+
+                    is_spinning = disk.get('isSpinning')
+                    if is_spinning is True:
+                        result['spinning'].append(disk_info)
+                        result['summary']['spinning_count'] += 1
+                    elif is_spinning is False:
+                        result['sleeping'].append(disk_info)
+                        result['summary']['sleeping_count'] += 1
+                    else:
+                        result['unknown'].append(disk_info)
+                        result['summary']['unknown_count'] += 1
+
+                    result['summary']['total_disks'] += 1
+
+        return result
+
     def get_network_info(self) -> Dict[str, Any]:
         """Get network interface information."""
         query = """
@@ -429,59 +638,136 @@ class UnraidGraphQLClient:
     def start_vm(self, vm_uuid: str) -> Dict[str, Any]:
         """
         Start a virtual machine.
-        
+
         Args:
             vm_uuid: The UUID of the VM to start
-            
-        Note:
-            This operation is not currently supported by the Unraid GraphQL API.
-            It is included for possible future API support.
         """
-        # This is a custom mutation that might be supported in future API versions
-        return {"error": "VM control operations are not currently supported by the Unraid GraphQL API"}
-    
+        mutation = """
+        mutation {
+            vm {
+                start(id: "%s") {
+                    uuid
+                    name
+                    state
+                }
+            }
+        }
+        """ % vm_uuid
+        return self.execute_query(mutation)
+
     def stop_vm(self, vm_uuid: str, force: bool = False) -> Dict[str, Any]:
         """
         Stop a virtual machine.
-        
+
         Args:
             vm_uuid: The UUID of the VM to stop
             force: Force power off if True, otherwise graceful shutdown
-            
-        Note:
-            This operation is not currently supported by the Unraid GraphQL API.
-            It is included for possible future API support.
         """
-        # This is a custom mutation that might be supported in future API versions
-        return {"error": "VM control operations are not currently supported by the Unraid GraphQL API"}
-    
+        if force:
+            mutation = """
+            mutation {
+                vm {
+                    forceStop(id: "%s") {
+                        uuid
+                        name
+                        state
+                    }
+                }
+            }
+            """ % vm_uuid
+        else:
+            mutation = """
+            mutation {
+                vm {
+                    stop(id: "%s") {
+                        uuid
+                        name
+                        state
+                    }
+                }
+            }
+            """ % vm_uuid
+        return self.execute_query(mutation)
+
     def pause_vm(self, vm_uuid: str) -> Dict[str, Any]:
         """
         Pause a virtual machine.
-        
+
         Args:
             vm_uuid: The UUID of the VM to pause
-            
-        Note:
-            This operation is not currently supported by the Unraid GraphQL API.
-            It is included for possible future API support.
         """
-        # This is a custom mutation that might be supported in future API versions
-        return {"error": "VM control operations are not currently supported by the Unraid GraphQL API"}
-    
+        mutation = """
+        mutation {
+            vm {
+                pause(id: "%s") {
+                    uuid
+                    name
+                    state
+                }
+            }
+        }
+        """ % vm_uuid
+        return self.execute_query(mutation)
+
     def resume_vm(self, vm_uuid: str) -> Dict[str, Any]:
         """
         Resume a paused virtual machine.
-        
+
         Args:
             vm_uuid: The UUID of the VM to resume
-            
-        Note:
-            This operation is not currently supported by the Unraid GraphQL API.
-            It is included for possible future API support.
         """
-        # This is a custom mutation that might be supported in future API versions
-        return {"error": "VM control operations are not currently supported by the Unraid GraphQL API"}
+        mutation = """
+        mutation {
+            vm {
+                resume(id: "%s") {
+                    uuid
+                    name
+                    state
+                }
+            }
+        }
+        """ % vm_uuid
+        return self.execute_query(mutation)
+
+    def reboot_vm(self, vm_uuid: str) -> Dict[str, Any]:
+        """
+        Reboot a virtual machine.
+
+        Args:
+            vm_uuid: The UUID of the VM to reboot
+        """
+        mutation = """
+        mutation {
+            vm {
+                reboot(id: "%s") {
+                    uuid
+                    name
+                    state
+                }
+            }
+        }
+        """ % vm_uuid
+        return self.execute_query(mutation)
+
+    def reset_vm(self, vm_uuid: str) -> Dict[str, Any]:
+        """
+        Reset a virtual machine.
+
+        Args:
+            vm_uuid: The UUID of the VM to reset
+        """
+        mutation = """
+        mutation {
+            vm {
+                reset(id: "%s") {
+                    uuid
+                    name
+                    state
+                }
+            }
+        }
+        """ % vm_uuid
+        return self.execute_query(mutation)
         
     def get_parity_history(self) -> Dict[str, Any]:
         """Get parity check history."""
@@ -531,22 +817,24 @@ class UnraidGraphQLClient:
     # System control methods
     
     def reboot_system(self) -> Dict[str, Any]:
-        """Reboot the Unraid system."""
-        mutation = """
-        mutation {
-            reboot
-        }
         """
-        return self.execute_query(mutation)
-    
+        Reboot the Unraid system.
+
+        Note: System reboot/shutdown operations are not currently available
+        through the Unraid GraphQL API. These operations may need to be
+        performed through the web interface or SSH.
+        """
+        return {"error": "System reboot operations are not currently supported by the Unraid GraphQL API"}
+
     def shutdown_system(self) -> Dict[str, Any]:
-        """Shutdown the Unraid system."""
-        mutation = """
-        mutation {
-            shutdown
-        }
         """
-        return self.execute_query(mutation)
+        Shutdown the Unraid system.
+
+        Note: System reboot/shutdown operations are not currently available
+        through the Unraid GraphQL API. These operations may need to be
+        performed through the web interface or SSH.
+        """
+        return {"error": "System shutdown operations are not currently supported by the Unraid GraphQL API"}
     
     # Array control methods
     
@@ -554,19 +842,23 @@ class UnraidGraphQLClient:
         """Start the Unraid array."""
         mutation = """
         mutation {
-            startArray {
-                state
+            array {
+                setState(input: { desiredState: START }) {
+                    state
+                }
             }
         }
         """
         return self.execute_query(mutation)
-    
+
     def stop_array(self) -> Dict[str, Any]:
         """Stop the Unraid array."""
         mutation = """
         mutation {
-            stopArray {
-                state
+            array {
+                setState(input: { desiredState: STOP }) {
+                    state
+                }
             }
         }
         """
@@ -578,34 +870,54 @@ class UnraidGraphQLClient:
         """Start a parity check. Set correct=True to correct errors."""
         mutation = """
         mutation {
-            startParityCheck(correct: %s)
+            parityCheck {
+                start(correct: %s) {
+                    status
+                    progress
+                }
+            }
         }
         """ % ("true" if correct else "false")
         return self.execute_query(mutation)
-    
+
     def pause_parity_check(self) -> Dict[str, Any]:
         """Pause a running parity check."""
         mutation = """
         mutation {
-            pauseParityCheck
+            parityCheck {
+                pause {
+                    status
+                    progress
+                }
+            }
         }
         """
         return self.execute_query(mutation)
-    
+
     def resume_parity_check(self) -> Dict[str, Any]:
         """Resume a paused parity check."""
         mutation = """
         mutation {
-            resumeParityCheck
+            parityCheck {
+                resume {
+                    status
+                    progress
+                }
+            }
         }
         """
         return self.execute_query(mutation)
-    
+
     def cancel_parity_check(self) -> Dict[str, Any]:
         """Cancel a running parity check."""
         mutation = """
         mutation {
-            cancelParityCheck
+            parityCheck {
+                cancel {
+                    status
+                    progress
+                }
+            }
         }
         """
         return self.execute_query(mutation)
@@ -832,7 +1144,682 @@ class UnraidGraphQLClient:
         }
         """ % importance_str
         return self.execute_query(mutation)
-    
+
+    # UPS Monitoring
+
+    def get_ups_devices(self) -> Dict[str, Any]:
+        """
+        Get information about all UPS devices.
+
+        Returns:
+            Dictionary containing UPS device information including status, battery, and power data
+        """
+        query = """
+        query {
+            upsDevices {
+                id
+                name
+                model
+                status
+                battery {
+                    chargeLevel
+                    estimatedRuntime
+                    health
+                }
+                power {
+                    inputVoltage
+                    outputVoltage
+                    loadPercentage
+                }
+            }
+        }
+        """
+        return self.execute_query(query)
+
+    def get_ups_device_by_id(self, device_id: str) -> Dict[str, Any]:
+        """
+        Get information about a specific UPS device.
+
+        Args:
+            device_id: The ID of the UPS device
+
+        Returns:
+            Dictionary containing UPS device information
+        """
+        query = """
+        query {
+            upsDeviceById(id: "%s") {
+                id
+                name
+                model
+                status
+                battery {
+                    chargeLevel
+                    estimatedRuntime
+                    health
+                }
+                power {
+                    inputVoltage
+                    outputVoltage
+                    loadPercentage
+                }
+            }
+        }
+        """ % device_id
+        return self.execute_query(query)
+
+    def get_ups_configuration(self) -> Dict[str, Any]:
+        """
+        Get UPS configuration settings.
+
+        Returns:
+            Dictionary containing UPS configuration
+        """
+        query = """
+        query {
+            upsConfiguration {
+                service
+                upsCable
+                customUpsCable
+                upsType
+                device
+                overrideUpsCapacity
+                batteryLevel
+                minutes
+                timeout
+                killUps
+                nisIp
+                netServer
+                upsName
+                modelName
+            }
+        }
+        """
+        return self.execute_query(query)
+
+    def get_ups_status_summary(self) -> Dict[str, Any]:
+        """
+        Get a summary of UPS status for monitoring purposes.
+
+        Returns:
+            Dictionary with simplified UPS status information suitable for Home Assistant
+        """
+        result = self.get_ups_devices()
+
+        if 'data' in result and 'upsDevices' in result['data']:
+            devices = result['data']['upsDevices']
+
+            if not devices:
+                return {
+                    'connected': False,
+                    'device_count': 0,
+                    'message': 'No UPS devices found'
+                }
+
+            # For simplicity, return info for the first device
+            # In most home setups, there's typically only one UPS
+            device = devices[0]
+            battery = device.get('battery', {})
+            power = device.get('power', {})
+
+            return {
+                'connected': True,
+                'device_count': len(devices),
+                'device_id': device.get('id'),
+                'device_name': device.get('name'),
+                'model': device.get('model'),
+                'status': device.get('status'),
+                'battery_level': battery.get('chargeLevel'),
+                'estimated_runtime': battery.get('estimatedRuntime'),
+                'battery_health': battery.get('health'),
+                'input_voltage': power.get('inputVoltage'),
+                'output_voltage': power.get('outputVoltage'),
+                'load_percentage': power.get('loadPercentage'),
+                'on_battery': device.get('status') not in ['ONLINE', 'CHARGING'],
+                'battery_low': battery.get('chargeLevel', 100) < 20 if battery.get('chargeLevel') is not None else False
+            }
+
+        return {
+            'connected': False,
+            'device_count': 0,
+            'error': 'Failed to retrieve UPS information'
+        }
+
+    # ===== VERIFIED SYSTEM MONITORING METHODS =====
+
+    def get_system_uptime(self) -> Dict[str, Any]:
+        """
+        Get system uptime information.
+
+        Returns:
+            Dictionary containing uptime and system information
+        """
+        query = """
+        {
+            info {
+                os {
+                    uptime
+                    hostname
+                    platform
+                    distro
+                    release
+                    kernel
+                    arch
+                }
+            }
+        }
+        """
+
+        try:
+            result = self.execute_query(query)
+            if 'data' in result and 'info' in result['data']:
+                os_info = result['data']['info']['os']
+                return {
+                    'uptime': os_info.get('uptime'),
+                    'hostname': os_info.get('hostname'),
+                    'platform': os_info.get('platform'),
+                    'distro': os_info.get('distro'),
+                    'release': os_info.get('release'),
+                    'kernel': os_info.get('kernel'),
+                    'architecture': os_info.get('arch')
+                }
+            return result
+        except Exception as e:
+            print(f"Error getting system uptime: {e}")
+            return {'error': str(e)}
+
+    def get_array_usage_summary(self) -> Dict[str, Any]:
+        """
+        Get overall array usage statistics.
+
+        Returns:
+            Dictionary with array usage summary including total, used, and free space
+        """
+        query = """
+        {
+            array {
+                state
+                disks {
+                    name
+                    device
+                    size
+                    fsUsed
+                    fsFree
+                    fsType
+                }
+                parities {
+                    name
+                    device
+                    size
+                }
+                caches {
+                    name
+                    device
+                    size
+                    fsUsed
+                    fsFree
+                    fsType
+                }
+            }
+        }
+        """
+
+        try:
+            result = self.execute_query(query)
+            if 'data' in result and 'array' in result['data']:
+                array_data = result['data']['array']
+
+                # Calculate totals for data disks
+                total_size = 0
+                total_used = 0
+                total_free = 0
+
+                for disk in array_data.get('disks', []):
+                    if disk.get('size'):
+                        total_size += disk['size']
+                    if disk.get('fsUsed'):
+                        total_used += disk['fsUsed']
+                    if disk.get('fsFree'):
+                        total_free += disk['fsFree']
+
+                # Add cache usage
+                cache_size = 0
+                cache_used = 0
+                cache_free = 0
+
+                for cache in array_data.get('caches', []):
+                    if cache.get('size'):
+                        cache_size += cache['size']
+                    if cache.get('fsUsed'):
+                        cache_used += cache['fsUsed']
+                    if cache.get('fsFree'):
+                        cache_free += cache['fsFree']
+
+                # Calculate percentages
+                data_percent_used = (total_used / total_size * 100) if total_size > 0 else 0
+                cache_percent_used = (cache_used / cache_size * 100) if cache_size > 0 else 0
+
+                return {
+                    'array_state': array_data.get('state'),
+                    'data_array': {
+                        'total_size': total_size,
+                        'used_space': total_used,
+                        'free_space': total_free,
+                        'percent_used': round(data_percent_used, 2),
+                        'disk_count': len(array_data.get('disks', []))
+                    },
+                    'cache': {
+                        'total_size': cache_size,
+                        'used_space': cache_used,
+                        'free_space': cache_free,
+                        'percent_used': round(cache_percent_used, 2),
+                        'cache_count': len(array_data.get('caches', []))
+                    },
+                    'parity_count': len(array_data.get('parities', []))
+                }
+            return result
+        except Exception as e:
+            print(f"Error getting array usage summary: {e}")
+            return {'error': str(e)}
+
+    def get_disk_health_status(self) -> Dict[str, Any]:
+        """
+        Get disk health status including temperature and error information.
+
+        Returns:
+            Dictionary with disk health information for array disks
+        """
+        query = """
+        {
+            array {
+                disks {
+                    name
+                    device
+                    size
+                    temp
+                    status
+                    numErrors
+                    numReads
+                    numWrites
+                    rotational
+                }
+                parities {
+                    name
+                    device
+                    size
+                    temp
+                    status
+                    numErrors
+                    numReads
+                    numWrites
+                    rotational
+                }
+                caches {
+                    name
+                    device
+                    size
+                    temp
+                    status
+                    numErrors
+                    numReads
+                    numWrites
+                    rotational
+                }
+            }
+        }
+        """
+
+        try:
+            result = self.execute_query(query)
+            if 'data' in result and 'array' in result['data']:
+                array_data = result['data']['array']
+
+                all_disks = []
+
+                # Process data disks
+                for disk in array_data.get('disks', []):
+                    all_disks.append({
+                        'name': disk.get('name'),
+                        'device': disk.get('device'),
+                        'type': 'data',
+                        'size': disk.get('size'),
+                        'temperature': disk.get('temp'),
+                        'status': disk.get('status'),
+                        'errors': disk.get('numErrors', 0),
+                        'reads': disk.get('numReads', 0),
+                        'writes': disk.get('numWrites', 0),
+                        'rotational': disk.get('rotational', True),
+                        'health_ok': disk.get('status') == 'DISK_OK' and disk.get('numErrors', 0) == 0
+                    })
+
+                # Process parity disks
+                for disk in array_data.get('parities', []):
+                    all_disks.append({
+                        'name': disk.get('name'),
+                        'device': disk.get('device'),
+                        'type': 'parity',
+                        'size': disk.get('size'),
+                        'temperature': disk.get('temp'),
+                        'status': disk.get('status'),
+                        'errors': disk.get('numErrors', 0),
+                        'reads': disk.get('numReads', 0),
+                        'writes': disk.get('numWrites', 0),
+                        'rotational': disk.get('rotational', True),
+                        'health_ok': disk.get('status') == 'DISK_OK' and disk.get('numErrors', 0) == 0
+                    })
+
+                # Process cache disks
+                for disk in array_data.get('caches', []):
+                    all_disks.append({
+                        'name': disk.get('name'),
+                        'device': disk.get('device'),
+                        'type': 'cache',
+                        'size': disk.get('size'),
+                        'temperature': disk.get('temp'),
+                        'status': disk.get('status'),
+                        'errors': disk.get('numErrors', 0),
+                        'reads': disk.get('numReads', 0),
+                        'writes': disk.get('numWrites', 0),
+                        'rotational': disk.get('rotational', True),
+                        'health_ok': disk.get('status') == 'DISK_OK' and disk.get('numErrors', 0) == 0
+                    })
+
+                # Calculate summary
+                healthy_disks = [d for d in all_disks if d['health_ok']]
+                disks_with_errors = [d for d in all_disks if d['errors'] > 0]
+                disks_with_temp = [d for d in all_disks if d['temperature'] is not None]
+
+                avg_temp = sum(d['temperature'] for d in disks_with_temp) / len(disks_with_temp) if disks_with_temp else None
+                max_temp = max(d['temperature'] for d in disks_with_temp) if disks_with_temp else None
+
+                return {
+                    'summary': {
+                        'total_disks': len(all_disks),
+                        'healthy_disks': len(healthy_disks),
+                        'disks_with_errors': len(disks_with_errors),
+                        'average_temperature': round(avg_temp, 1) if avg_temp else None,
+                        'max_temperature': max_temp,
+                        'overall_health': 'GOOD' if len(healthy_disks) == len(all_disks) else 'WARNING'
+                    },
+                    'disks': all_disks,
+                    'errors': disks_with_errors
+                }
+            return result
+        except Exception as e:
+            print(f"Error getting disk health status: {e}")
+            return {'error': str(e)}
+
+    def get_parity_check_status(self) -> Dict[str, Any]:
+        """
+        Get parity check status and history.
+
+        Returns:
+            Dictionary with current and historical parity check information
+        """
+        query = """
+        {
+            parityHistory {
+                date
+                duration
+                speed
+                status
+                errors
+                progress
+                correcting
+                paused
+                running
+            }
+        }
+        """
+
+        try:
+            result = self.execute_query(query)
+            if 'data' in result and 'parityHistory' in result['data']:
+                history = result['data']['parityHistory']
+
+                if not history:
+                    return {
+                        'current_check': None,
+                        'last_check': None,
+                        'history_count': 0,
+                        'recent_history': []
+                    }
+
+                # Find current running check
+                current_check = None
+                for check in history:
+                    if check.get('running'):
+                        current_check = check
+                        break
+
+                # Get most recent completed check
+                completed_checks = [c for c in history if c.get('status') == 'COMPLETED']
+                last_check = completed_checks[0] if completed_checks else None
+
+                # Get recent history (last 10 checks)
+                recent_history = history[:10]
+
+                return {
+                    'current_check': current_check,
+                    'last_check': last_check,
+                    'history_count': len(history),
+                    'recent_history': recent_history,
+                    'summary': {
+                        'is_running': current_check is not None,
+                        'is_paused': current_check.get('paused', False) if current_check else False,
+                        'progress': current_check.get('progress') if current_check else None,
+                        'last_status': last_check.get('status') if last_check else None,
+                        'last_errors': last_check.get('errors') if last_check else None,
+                        'last_duration': last_check.get('duration') if last_check else None
+                    }
+                }
+            return result
+        except Exception as e:
+            print(f"Error getting parity check status: {e}")
+            return {'error': str(e)}
+
+    # ===== VERIFIED CONTROL OPERATIONS =====
+
+    def start_docker_container(self, container_id: str) -> Dict[str, Any]:
+        """
+        Start a Docker container.
+
+        Args:
+            container_id: The ID of the container to start
+
+        Returns:
+            Dictionary with operation result
+        """
+        mutation = """
+        mutation {
+            docker {
+                start(id: "%s") {
+                    id
+                    names
+                    state
+                    status
+                }
+            }
+        }
+        """ % container_id
+
+        try:
+            return self.execute_query(mutation)
+        except Exception as e:
+            print(f"Error starting Docker container: {e}")
+            return {'error': str(e)}
+
+    def stop_docker_container(self, container_id: str) -> Dict[str, Any]:
+        """
+        Stop a Docker container.
+
+        Args:
+            container_id: The ID of the container to stop
+
+        Returns:
+            Dictionary with operation result
+        """
+        mutation = """
+        mutation {
+            docker {
+                stop(id: "%s") {
+                    id
+                    names
+                    state
+                    status
+                }
+            }
+        }
+        """ % container_id
+
+        try:
+            return self.execute_query(mutation)
+        except Exception as e:
+            print(f"Error stopping Docker container: {e}")
+            return {'error': str(e)}
+
+    def start_vm(self, vm_id: str) -> Dict[str, Any]:
+        """
+        Start a virtual machine.
+
+        Args:
+            vm_id: The ID of the VM to start
+
+        Returns:
+            Dictionary with operation result
+        """
+        mutation = """
+        mutation {
+            vm {
+                start(id: "%s") {
+                    id
+                    name
+                    state
+                }
+            }
+        }
+        """ % vm_id
+
+        try:
+            return self.execute_query(mutation)
+        except Exception as e:
+            print(f"Error starting VM: {e}")
+            return {'error': str(e)}
+
+    def stop_vm(self, vm_id: str, force: bool = False) -> Dict[str, Any]:
+        """
+        Stop a virtual machine.
+
+        Args:
+            vm_id: The ID of the VM to stop
+            force: Whether to force stop the VM
+
+        Returns:
+            Dictionary with operation result
+        """
+        operation = "forceStop" if force else "stop"
+        mutation = """
+        mutation {
+            vm {
+                %s(id: "%s") {
+                    id
+                    name
+                    state
+                }
+            }
+        }
+        """ % (operation, vm_id)
+
+        try:
+            return self.execute_query(mutation)
+        except Exception as e:
+            print(f"Error stopping VM: {e}")
+            return {'error': str(e)}
+
+    def pause_vm(self, vm_id: str) -> Dict[str, Any]:
+        """
+        Pause a virtual machine.
+
+        Args:
+            vm_id: The ID of the VM to pause
+
+        Returns:
+            Dictionary with operation result
+        """
+        mutation = """
+        mutation {
+            vm {
+                pause(id: "%s") {
+                    id
+                    name
+                    state
+                }
+            }
+        }
+        """ % vm_id
+
+        try:
+            return self.execute_query(mutation)
+        except Exception as e:
+            print(f"Error pausing VM: {e}")
+            return {'error': str(e)}
+
+    def resume_vm(self, vm_id: str) -> Dict[str, Any]:
+        """
+        Resume a virtual machine.
+
+        Args:
+            vm_id: The ID of the VM to resume
+
+        Returns:
+            Dictionary with operation result
+        """
+        mutation = """
+        mutation {
+            vm {
+                resume(id: "%s") {
+                    id
+                    name
+                    state
+                }
+            }
+        }
+        """ % vm_id
+
+        try:
+            return self.execute_query(mutation)
+        except Exception as e:
+            print(f"Error resuming VM: {e}")
+            return {'error': str(e)}
+
+    def reboot_vm(self, vm_id: str) -> Dict[str, Any]:
+        """
+        Reboot a virtual machine.
+
+        Args:
+            vm_id: The ID of the VM to reboot
+
+        Returns:
+            Dictionary with operation result
+        """
+        mutation = """
+        mutation {
+            vm {
+                reboot(id: "%s") {
+                    id
+                    name
+                    state
+                }
+            }
+        }
+        """ % vm_id
+
+        try:
+            return self.execute_query(mutation)
+        except Exception as e:
+            print(f"Error rebooting VM: {e}")
+            return {'error': str(e)}
+
     # Remote access configuration
     
     def setup_remote_access(self, access_type: str, forward_type: str = None, 

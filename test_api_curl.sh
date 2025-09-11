@@ -2,7 +2,7 @@
 # Curl-based script to test the Unraid GraphQL API
 
 # Configuration (default values)
-SERVER_IP="192.168.1.100"
+SERVER_IP=""
 API_KEY=""
 QUERY_TYPE="info"
 DIRECT_IP=false
@@ -15,8 +15,9 @@ show_help() {
     echo "  -h, --help       Show this help message"
     echo "  -i, --ip         Server IP address (default: $SERVER_IP)"
     echo "  -k, --key        API key (default: predefined key)"
-    echo "  -t, --type       Query type: info, array, docker, disks, network, shares, vms"
-    echo "                   (default: info)"
+    echo "  -t, --type       Query type: info, array, docker, disks, network, shares, vms,"
+    echo "                   notifications, users, apikeys, memory, cpu, ups, disk-sleep,
+                   system-uptime, array-usage, disk-health, parity-status (default: info)"
     echo "  -d, --direct     Use direct IP connection without checking for redirects"
     echo ""
     echo "Examples:"
@@ -62,11 +63,11 @@ done
 
 # Define queries
 INFO_QUERY='{
-  "query": "{ info { os { platform distro release uptime } cpu { manufacturer brand cores threads } memory { total free used } versions { unraid } } }"
+  "query": "{ info { cpu { id manufacturer brand cores threads } memory { layout { size bank type clockSpeed manufacturer } } versions { core { unraid api kernel } packages { openssl node npm } } } }"
 }'
 
 ARRAY_QUERY='{
-  "query": "{ array { state capacity { disks { free used total } } disks { name size status type temp } } }"
+  "query": "{ array { state capacity { kilobytes { free used total } disks { free used total } } boot { name device size temp type } parities { name device size status type } disks { name device size status type temp fsSize fsFree fsUsed } caches { name device size temp status type fsSize fsFree fsUsed } } }"
 }'
 
 DOCKER_QUERY='{
@@ -74,7 +75,7 @@ DOCKER_QUERY='{
 }'
 
 DISKS_QUERY='{
-  "query": "{ disks { device name type size vendor temperature smartStatus } }"
+  "query": "{ disks { id device name type size vendor firmwareRevision serialNum interfaceType smartStatus temperature isSpinning partitions { name fsType size } } }"
 }'
 
 NETWORK_QUERY='{
@@ -87,6 +88,50 @@ SHARES_QUERY='{
 
 VMS_QUERY='{
   "query": "{ vms { domain { uuid name state } } }"
+}'
+
+NOTIFICATIONS_QUERY='{
+  "query": "{ notifications { list(filter: { type: UNREAD, offset: 0, limit: 10 }) { id title subject description importance link type timestamp formattedTimestamp } overview { unread { info warning alert total } archive { info warning alert total } } } }"
+}'
+
+USERS_QUERY='{
+  "query": "{ me { id name description roles } }"
+}'
+
+APIKEYS_QUERY='{
+  "query": "{ apiKeys { id name description roles createdAt permissions } }"
+}'
+
+MEMORY_QUERY='{
+  "query": "{ info { memory { layout { size bank type clockSpeed manufacturer } } } }"
+}'
+
+CPU_QUERY='{
+  "query": "{ info { cpu { id manufacturer brand cores threads clockSpeed architecture flags } } }"
+}'
+
+UPS_QUERY='{
+  "query": "{ upsDevices { id name model status battery { chargeLevel estimatedRuntime health } power { inputVoltage outputVoltage loadPercentage } } }"
+}'
+
+DISK_SLEEP_QUERY='{
+  "query": "{ array { disks { name device isSpinning rotational temp } parities { name device isSpinning rotational temp } caches { name device isSpinning rotational temp } } disks { name device isSpinning temperature type } }"
+}'
+
+SYSTEM_UPTIME_QUERY='{
+  "query": "{ info { os { uptime hostname platform distro release kernel arch } } }"
+}'
+
+ARRAY_USAGE_QUERY='{
+  "query": "{ array { state disks { name device size fsUsed fsFree fsType } parities { name device size } caches { name device size fsUsed fsFree fsType } } }"
+}'
+
+DISK_HEALTH_QUERY='{
+  "query": "{ array { disks { name device size temp status numErrors numReads numWrites rotational } parities { name device size temp status numErrors numReads numWrites rotational } caches { name device size temp status numErrors numReads numWrites rotational } } }"
+}'
+
+PARITY_STATUS_QUERY='{
+  "query": "{ parityHistory { date duration speed status errors progress correcting paused running } }"
 }'
 
 # Set the query based on type
@@ -118,6 +163,50 @@ case $QUERY_TYPE in
     vms)
         QUERY=$VMS_QUERY
         TITLE="Virtual Machines"
+        ;;
+    notifications)
+        QUERY=$NOTIFICATIONS_QUERY
+        TITLE="Notifications"
+        ;;
+    users)
+        QUERY=$USERS_QUERY
+        TITLE="Current User"
+        ;;
+    apikeys)
+        QUERY=$APIKEYS_QUERY
+        TITLE="API Keys"
+        ;;
+    memory)
+        QUERY=$MEMORY_QUERY
+        TITLE="Memory Information"
+        ;;
+    cpu)
+        QUERY=$CPU_QUERY
+        TITLE="CPU Information"
+        ;;
+    ups)
+        QUERY=$UPS_QUERY
+        TITLE="UPS Devices"
+        ;;
+    disk-sleep)
+        QUERY=$DISK_SLEEP_QUERY
+        TITLE="Disk Sleep Status"
+        ;;
+    system-uptime)
+        QUERY=$SYSTEM_UPTIME_QUERY
+        TITLE="System Uptime"
+        ;;
+    array-usage)
+        QUERY=$ARRAY_USAGE_QUERY
+        TITLE="Array Usage Summary"
+        ;;
+    disk-health)
+        QUERY=$DISK_HEALTH_QUERY
+        TITLE="Disk Health Status"
+        ;;
+    parity-status)
+        QUERY=$PARITY_STATUS_QUERY
+        TITLE="Parity Check Status"
         ;;
     *)
         echo "Unknown query type: $QUERY_TYPE"
