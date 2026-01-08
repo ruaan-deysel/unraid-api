@@ -196,7 +196,17 @@ class ParityCheck(UnraidBaseModel):
 
 
 class ArrayDisk(UnraidBaseModel):
-    """Array disk information."""
+    """Array disk information.
+
+    This model represents disks as returned by the array endpoint,
+    which does NOT wake sleeping disks. Use this for periodic polling.
+
+    Note:
+        - temp will be null/0 for disks in standby mode
+        - isSpinning indicates if disk is active (True) or standby (False)
+        - This is safe for Home Assistant integrations that poll frequently
+
+    """
 
     id: str
     idx: int | None = None  # Optional - boot device doesn't have idx
@@ -208,10 +218,15 @@ class ArrayDisk(UnraidBaseModel):
     fsUsed: int | None = None
     fsFree: int | None = None
     fsType: str | None = None  # Filesystem type (XFS, BTRFS, vfat, etc.)
-    temp: int | None = None
+    temp: int | None = None  # Temperature in Celsius (null when disk is standby)
     status: str | None = None
-    isSpinning: bool | None = None
-    smartStatus: str | None = None
+    isSpinning: bool | None = None  # True = active, False = standby/sleeping
+    smartStatus: str | None = None  # Only available via physical disk query
+
+    @property
+    def is_standby(self) -> bool:
+        """Return True if disk is in standby/sleeping mode."""
+        return self.isSpinning is False
 
     @property
     def size_bytes(self) -> int | None:
@@ -251,6 +266,34 @@ class UnraidArray(UnraidBaseModel):
     parities: list[ArrayDisk] = []
     caches: list[ArrayDisk] = []
     boot: ArrayDisk | None = None
+
+
+# =============================================================================
+# Physical Disk Models (WARNING: Queries wake sleeping disks!)
+# =============================================================================
+
+
+class PhysicalDisk(UnraidBaseModel):
+    """Physical disk information from the disks endpoint.
+
+    WARNING: Querying physical disks WAKES SLEEPING DISKS!
+    Use ArrayDisk (from get_array_disks) for disk info without wake.
+
+    This model contains hardware-level disk information including SMART
+    status, which requires disk access and will spin up any sleeping disk.
+
+    """
+
+    id: str
+    device: str | None = None
+    name: str | None = None
+    vendor: str | None = None
+    size: int | None = None  # Size in bytes
+    type: str | None = None
+    interfaceType: str | None = None  # SATA, SAS, NVMe, USB, etc.
+    smartStatus: str | None = None  # OK, UNKNOWN, FAILING, etc.
+    temperature: float | None = None  # Temperature in Celsius
+    isSpinning: bool | None = None
 
 
 # =============================================================================
@@ -441,24 +484,6 @@ class DiskPartition(UnraidBaseModel):
     name: str | None = None
     fsType: str | None = None
     size: int | None = None
-
-
-class PhysicalDisk(UnraidBaseModel):
-    """Physical disk information with SMART data."""
-
-    id: str
-    device: str | None = None
-    name: str | None = None
-    type: str | None = None
-    size: int | None = None
-    vendor: str | None = None
-    firmwareRevision: str | None = None
-    serialNum: str | None = None
-    interfaceType: str | None = None
-    smartStatus: str | None = None
-    temperature: int | None = None
-    isSpinning: bool | None = None
-    partitions: list[DiskPartition] = []
 
 
 # =============================================================================

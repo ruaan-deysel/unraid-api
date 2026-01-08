@@ -11,6 +11,7 @@ from unraid_api.models import (
     DockerContainer,
     InfoOs,
     Notification,
+    PhysicalDisk,
     Share,
     UnraidArray,
 )
@@ -112,6 +113,22 @@ class TestArrayDisk:
         assert disk.name == "Disk 1"
         assert disk.temp == 35
         assert disk.isSpinning is True
+
+    def test_disk_is_standby_spinning(self) -> None:
+        """Test is_standby property when disk is spinning."""
+        disk = ArrayDisk(id="disk:1", isSpinning=True)
+        assert disk.is_standby is False
+
+    def test_disk_is_standby_sleeping(self) -> None:
+        """Test is_standby property when disk is in standby."""
+        disk = ArrayDisk(id="disk:1", isSpinning=False)
+        assert disk.is_standby is True
+
+    def test_disk_is_standby_none(self) -> None:
+        """Test is_standby property when isSpinning is None."""
+        disk = ArrayDisk(id="disk:1", isSpinning=None)
+        # When isSpinning is None, is_standby should be False (not certain)
+        assert disk.is_standby is False
 
     def test_disk_byte_properties(self) -> None:
         """Test disk byte conversion properties."""
@@ -286,6 +303,39 @@ class TestNotification:
 
         assert notification.title == "Parity Check Complete"
         assert notification.importance == "INFO"
+
+
+class TestPhysicalDisk:
+    """Tests for PhysicalDisk model."""
+
+    def test_physical_disk_required_fields(self) -> None:
+        """Test physical disk with required fields only."""
+        disk = PhysicalDisk(id="disk:sda")
+        assert disk.id == "disk:sda"
+        assert disk.device is None
+        assert disk.smartStatus is None
+
+    def test_physical_disk_with_all_fields(self) -> None:
+        """Test physical disk with all fields."""
+        disk = PhysicalDisk(
+            id="disk:sda",
+            device="/dev/sda",
+            name="WDC WD140EDFZ-11A0VA0",
+            vendor="Western Digital",
+            size=14000519643136,  # 14TB in bytes
+            type="HDD",
+            interfaceType="SATA",
+            smartStatus="OK",
+            temperature=35.0,
+            isSpinning=True,
+        )
+
+        assert disk.id == "disk:sda"
+        assert disk.vendor == "Western Digital"
+        assert disk.interfaceType == "SATA"
+        assert disk.smartStatus == "OK"
+        assert disk.temperature == 35.0
+        assert disk.isSpinning is True
 
 
 class TestForwardCompatibility:

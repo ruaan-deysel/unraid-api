@@ -983,6 +983,10 @@ class UnraidClient:
     async def get_array_status(self) -> dict[str, Any]:
         """Get comprehensive array status.
 
+        This method does NOT wake sleeping disks - it's safe for periodic polling.
+        Temperature will be null/0 for disks in standby mode.
+        Use the isSpinning field to check if a disk is active.
+
         Returns:
             Array data including state, capacity, disks, and parity status.
 
@@ -1003,20 +1007,23 @@ class UnraidClient:
                         errors
                         speed
                     }
-                    boot { id name device size temp type }
+                    boot {
+                        id name device size temp type
+                        fsSize fsUsed fsFree fsType
+                    }
                     parities {
-                        id name device size status type temp
-                        numReads numWrites numErrors
+                        id idx name device size status type temp
+                        isSpinning
                     }
                     disks {
-                        id name device size status type temp
-                        fsSize fsFree fsUsed
-                        numReads numWrites numErrors
+                        id idx name device size status type temp
+                        fsSize fsFree fsUsed fsType
                         isSpinning
                     }
                     caches {
-                        id name device size status type temp
-                        fsSize fsFree fsUsed
+                        id idx name device size status type temp
+                        fsSize fsFree fsUsed fsType
+                        isSpinning
                     }
                 }
             }
@@ -1168,16 +1175,33 @@ class UnraidClient:
     # Physical Disk Methods
     # =========================================================================
 
-    async def get_disks(self) -> list[dict[str, Any]]:
+    async def get_physical_disks(
+        self, include_smart: bool = False
+    ) -> list[dict[str, Any]]:
         """Get all physical disks.
+
+        WARNING: This query WILL WAKE UP sleeping/standby disks!
+        For disk information without waking disks, use get_array_disks() instead.
+
+        Args:
+            include_smart: If True, include SMART status (may cause disk wake).
 
         Returns:
             List of physical disk data dictionaries.
 
+        Note:
+            The Unraid API's physical disks endpoint requires disk access which
+            spins up any sleeping disks. If you need disk status without waking
+            disks, use get_array_disks() which uses the array endpoint that
+            provides disk info (including temperature for spinning disks and
+            isSpinning status) without forcing disks to wake up.
+
         """
-        query_str = """
-            query {
-                disks {
+        # Build query with optional SMART fields
+        smart_fields = "smartStatus" if include_smart else ""
+        query_str = f"""
+            query {{
+                disks {{
                     id
                     device
                     name
@@ -1185,14 +1209,85 @@ class UnraidClient:
                     size
                     type
                     interfaceType
-                    smartStatus
                     temperature
                     isSpinning
+                    {smart_fields}
+                }}
+            }}
+        """
+        result = await self.query(query_str)
+        return list(result.get("disks", []))
+
+    # Alias for backwards compatibility - deprecated
+    async def get_disks(self) -> list[dict[str, Any]]:
+        """Get all physical disks.
+
+        DEPRECATED: Use get_physical_disks() or get_array_disks() instead.
+
+        WARNING: This query WILL WAKE UP sleeping/standby disks!
+        Use get_array_disks() for disk info without waking disks.
+
+        Returns:
+            List of physical disk data dictionaries.
+
+        """
+        return await self.get_physical_disks(include_smart=False)
+
+    async def get_array_disks(self) -> dict[str, Any]:
+        """Get array disk information WITHOUT waking sleeping disks.
+
+        This is the recommended method for getting disk status in automations
+        or periodic polling, as it does NOT wake sleeping/standby disks.
+
+        The array endpoint returns disk information including:
+        - Disk state, name, device, size, status, type
+        - Temperature (only for spinning disks, null/0 for standby)
+        - isSpinning (True if disk is active, False if in standby)
+        - Filesystem info (fsSize, fsUsed, fsFree, fsType)
+
+        Returns:
+            Dictionary with keys:
+            - 'boot': Boot/flash device info (or None)
+            - 'disks': List of data disks
+            - 'parities': List of parity disks
+            - 'caches': List of cache/pool disks
+
+        Note:
+            Temperature will be null/0 for disks in standby mode.
+            Use the isSpinning field to check if a disk is active.
+            This is the same approach used by Home Assistant integrations
+            to avoid disrupting disk power management.
+
+        """
+        query_str = """
+            query {
+                array {
+                    boot {
+                        id name device size status type temp
+                        fsSize fsUsed fsFree fsType
+                    }
+                    disks {
+                        id idx name device size status type temp
+                        fsSize fsUsed fsFree fsType isSpinning
+                    }
+                    parities {
+                        id idx name device size status type temp isSpinning
+                    }
+                    caches {
+                        id idx name device size status type temp
+                        fsSize fsUsed fsFree fsType isSpinning
+                    }
                 }
             }
         """
         result = await self.query(query_str)
-        return list(result.get("disks", []))
+        array_data = result.get("array", {})
+        return {
+            "boot": array_data.get("boot"),
+            "disks": list(array_data.get("disks", [])),
+            "parities": list(array_data.get("parities", [])),
+            "caches": list(array_data.get("caches", [])),
+        }
 
     # =========================================================================
     # Parity History Methods
