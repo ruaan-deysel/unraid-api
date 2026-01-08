@@ -762,6 +762,7 @@ class UnraidClient:
             List of container data dictionaries.
 
         """
+        # Using core fields guaranteed across API versions
         query_str = """
             query {
                 docker {
@@ -769,14 +770,13 @@ class UnraidClient:
                         id
                         names
                         image
+                        imageId
                         state
                         status
                         autoStart
+                        command
+                        created
                         ports { ip privatePort publicPort type }
-                        isUpdateAvailable
-                        isOrphaned
-                        webUiUrl
-                        iconUrl
                     }
                 }
             }
@@ -1188,7 +1188,6 @@ class UnraidClient:
                     smartStatus
                     temperature
                     isSpinning
-                    partitions { name fsType size }
                 }
             }
         """
