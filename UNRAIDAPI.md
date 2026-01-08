@@ -1,7 +1,7 @@
 # Unraid GraphQL API Reference
 
-> **API Version:** 4.29.2+  
-> **Unraid Version:** 7.1.4+  
+> **API Version:** 4.29.2+
+> **Unraid Version:** 7.1.4+
 > **Last Updated:** January 2026
 
 This document provides a comprehensive reference for the Unraid GraphQL API, sourced from the official [unraid/api](https://github.com/unraid/api) repository.
