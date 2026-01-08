@@ -1,39 +1,39 @@
-# Unraid GraphQL API Documentation
+# Unraid GraphQL API Reference
 
-## Overview
+> **API Version:** 4.29.2+  
+> **Unraid Version:** 7.1.4+  
+> **Last Updated:** January 2026
 
-This document provides a comprehensive guide to the modern Unraid GraphQL API (v4.21.0+). The API allows developers to interact with various components of an Unraid server, including array management, disk operations, user administration, Docker containers, virtual machines, notifications, and more.
-
-**This documentation is updated for the latest Unraid API schema and is compatible with Unraid 7.1.4+.**
+This document provides a comprehensive reference for the Unraid GraphQL API, sourced from the official [unraid/api](https://github.com/unraid/api) repository.
 
 ## Table of Contents
 
 - [Authentication](#authentication)
-- [Core Resources](#core-resources)
-  - [Array Management](#array-management)
-  - [Disk Operations](#disk-operations)
-  - [User Management](#user-management)
-  - [Docker Management](#docker-management)
-  - [Virtual Machines](#virtual-machines)
-  - [Remote Access](#remote-access)
-  - [Notifications](#notifications)
-- [API Reference](#api-reference)
-  - [Queries](#queries)
-  - [Mutations](#mutations)
-  - [Subscriptions](#subscriptions)
-- [Custom Types](#custom-types)
-- [Enumerations](#enumerations)
+- [Scalars](#scalars)
+- [Enums](#enums)
+- [Types](#types)
+- [Queries](#queries)
+- [Mutations](#mutations)
+- [Subscriptions](#subscriptions)
+
+---
 
 ## Authentication
 
-The API uses API keys for authentication. You can create an API key using the new mutation structure:
+Include the API key in your requests as a header:
+
+```
+x-api-key: YOUR_API_KEY_HERE
+```
+
+### Creating an API Key
 
 ```graphql
 mutation {
   apiKey {
     create(input: {
-      name: "My API Key",
-      description: "API key for my application",
+      name: "My API Key"
+      description: "API key for my application"
       roles: [ADMIN]
     }) {
       id
@@ -46,951 +46,1493 @@ mutation {
 }
 ```
 
-Include the API key in your requests as a header:
+---
 
+## Scalars
+
+| Scalar | Description |
+|--------|-------------|
+| `PrefixedID` | ID prefixed with server identifier (e.g., `server123:resource456`) |
+| `BigInt` | Non-fractional signed whole numeric values |
+| `DateTime` | UTC date-time string (e.g., `2019-12-03T09:54:33Z`) |
+| `JSON` | JSON values per ECMA-404 |
+| `Port` | Valid TCP port (0-65535) |
+| `URL` | Standard URL format per RFC3986 |
+
+---
+
+## Enums
+
+### Array & Disk
+
+```graphql
+enum ArrayState {
+  STARTED
+  STOPPED
+  NEW_ARRAY
+  RECON_DISK
+  DISABLE_DISK
+  SWAP_DSBL
+  INVALID_EXPANSION
+  PARITY_NOT_BIGGEST
+  TOO_MANY_MISSING_DISKS
+  NEW_DISK_TOO_SMALL
+  NO_DATA_DISKS
+}
+
+enum ArrayDiskStatus {
+  DISK_NP          # Not present
+  DISK_OK          # Normal
+  DISK_NP_MISSING  # Missing
+  DISK_INVALID     # Invalid
+  DISK_WRONG       # Wrong disk
+  DISK_DSBL        # Disabled
+  DISK_NP_DSBL     # Not present, disabled
+  DISK_DSBL_NEW    # Disabled, new
+  DISK_NEW         # New disk
+}
+
+enum ArrayDiskType {
+  DATA
+  PARITY
+  FLASH
+  CACHE
+}
+
+enum ArrayDiskFsColor {
+  GREEN_ON
+  GREEN_BLINK
+  BLUE_ON
+  BLUE_BLINK
+  YELLOW_ON
+  YELLOW_BLINK
+  RED_ON
+  RED_OFF
+  GREY_OFF
+}
+
+enum DiskFsType {
+  XFS
+  BTRFS
+  VFAT
+  ZFS
+  EXT4
+  NTFS
+}
+
+enum DiskInterfaceType {
+  SAS
+  SATA
+  USB
+  PCIE
+  UNKNOWN
+}
+
+enum DiskSmartStatus {
+  OK
+  UNKNOWN
+}
 ```
-x-api-key: YOUR_API_KEY_HERE
+
+### Parity Check
+
+```graphql
+enum ParityCheckStatus {
+  NEVER_RUN
+  RUNNING
+  PAUSED
+  COMPLETED
+  CANCELLED
+  FAILED
+}
 ```
 
-## Core Resources
+### Docker
 
-### Array Management
+```graphql
+enum ContainerState {
+  RUNNING
+  PAUSED
+  EXITED
+}
 
-The Unraid array is the core storage component of the system. The modern API provides comprehensive operations to:
+enum ContainerPortType {
+  TCP
+  UDP
+}
 
-- Start and stop the array using mutations
-- Add and remove disks from the array
-- Monitor detailed array status including all disk types
-- Perform parity checks with full control
-- Mount and unmount individual disks
+enum UpdateStatus {
+  UP_TO_DATE
+  UPDATE_AVAILABLE
+  REBUILD_READY
+  UNKNOWN
+}
+```
 
-Example query to get comprehensive array information:
+### VM
+
+```graphql
+enum VmState {
+  NOSTATE
+  RUNNING
+  IDLE
+  PAUSED
+  SHUTDOWN
+  SHUTOFF
+  CRASHED
+  PMSUSPENDED
+}
+```
+
+### Authentication & Permissions
+
+```graphql
+enum Role {
+  ADMIN    # Full administrative access
+  CONNECT  # Internal role for Unraid Connect
+  GUEST    # Basic read access to user profile only
+  VIEWER   # Read-only access to all resources
+}
+
+enum Resource {
+  ACTIVATION_CODE
+  API_KEY
+  ARRAY
+  CLOUD
+  CONFIG
+  CONNECT
+  CONNECT__REMOTE_ACCESS
+  CUSTOMIZATIONS
+  DASHBOARD
+  DISK
+  DISPLAY
+  DOCKER
+  FLASH
+  INFO
+  LOGS
+  ME
+  NETWORK
+  NOTIFICATIONS
+  ONLINE
+  OS
+  OWNER
+  PERMISSION
+  REGISTRATION
+  SERVERS
+  SERVICES
+  SHARE
+  VARS
+  VMS
+  WELCOME
+}
+
+enum AuthAction {
+  CREATE_ANY
+  CREATE_OWN
+  READ_ANY
+  READ_OWN
+  UPDATE_ANY
+  UPDATE_OWN
+  DELETE_ANY
+  DELETE_OWN
+}
+```
+
+### Registration
+
+```graphql
+enum registrationType {
+  BASIC
+  PLUS
+  PRO
+  STARTER
+  UNLEASHED
+  LIFETIME
+  INVALID
+  TRIAL
+}
+
+enum RegistrationState {
+  TRIAL
+  BASIC
+  PLUS
+  PRO
+  STARTER
+  UNLEASHED
+  LIFETIME
+  EEXPIRED
+  EGUID
+  EGUID1
+  ETRIAL
+  ENOKEYFILE
+  ENOKEYFILE1
+  ENOKEYFILE2
+  ENOFLASH
+  ENOFLASH1
+  ENOFLASH2
+  ENOFLASH3
+  ENOFLASH4
+  ENOFLASH5
+  ENOFLASH6
+  ENOFLASH7
+  EBLACKLISTED
+  EBLACKLISTED1
+  EBLACKLISTED2
+  ENOCONN
+}
+```
+
+### Notifications
+
+```graphql
+enum NotificationImportance {
+  ALERT
+  INFO
+  WARNING
+}
+
+enum NotificationType {
+  UNREAD
+  ARCHIVE
+}
+```
+
+### UPS
+
+```graphql
+enum UPSServiceState {
+  ENABLE
+  DISABLE
+}
+
+enum UPSCableType {
+  USB
+  SIMPLE
+  SMART
+  ETHER
+  CUSTOM
+}
+
+enum UPSType {
+  USB
+  APCSMART
+  NET
+  SNMP
+  DUMB
+  PCNET
+  MODBUS
+}
+
+enum UPSKillPower {
+  YES
+  NO
+}
+```
+
+### Display & Theme
+
+```graphql
+enum ThemeName {
+  azure
+  black
+  gray
+  white
+}
+
+enum Temperature {
+  CELSIUS
+  FAHRENHEIT
+}
+```
+
+### Network & Connect
+
+```graphql
+enum URL_TYPE {
+  LAN
+  WIREGUARD
+  WAN
+  MDNS
+  OTHER
+  DEFAULT
+}
+
+enum WAN_ACCESS_TYPE {
+  DYNAMIC
+  ALWAYS
+  DISABLED
+}
+
+enum WAN_FORWARD_TYPE {
+  UPNP
+  STATIC
+}
+
+enum DynamicRemoteAccessType {
+  STATIC
+  UPNP
+  DISABLED
+}
+
+enum ServerStatus {
+  ONLINE
+  OFFLINE
+  NEVER_CONNECTED
+}
+
+enum MinigraphStatus {
+  PRE_INIT
+  CONNECTING
+  CONNECTED
+  PING_FAILURE
+  ERROR_RETRYING
+}
+```
+
+---
+
+## Types
+
+### Array
+
+```graphql
+type UnraidArray {
+  id: PrefixedID!
+  state: ArrayState!
+  capacity: ArrayCapacity!
+  boot: ArrayDisk
+  parities: [ArrayDisk!]!
+  parityCheckStatus: ParityCheck!
+  disks: [ArrayDisk!]!
+  caches: [ArrayDisk!]!
+}
+
+type ArrayCapacity {
+  kilobytes: Capacity!
+  disks: Capacity!
+}
+
+type Capacity {
+  free: String!
+  used: String!
+  total: String!
+}
+
+type ArrayDisk {
+  id: PrefixedID!
+  idx: Int!                    # Slot number (parity1=0, parity2=29, data=1-28, cache=30-53, flash=54)
+  name: String
+  device: String
+  size: BigInt                 # KB
+  status: ArrayDiskStatus
+  rotational: Boolean          # HDD or SSD
+  temp: Int                    # Temperature (NaN if array not started)
+  numReads: BigInt
+  numWrites: BigInt
+  numErrors: BigInt
+  fsSize: BigInt               # KB - filesystem total
+  fsFree: BigInt               # KB - filesystem free
+  fsUsed: BigInt               # KB - filesystem used
+  exportable: Boolean
+  type: ArrayDiskType!
+  warning: Int                 # % disk space warning threshold
+  critical: Int                # % disk space critical threshold
+  fsType: String
+  comment: String
+  format: String               # e.g., "MBR: 4KiB-aligned"
+  transport: String            # ata | nvme | usb
+  color: ArrayDiskFsColor
+  isSpinning: Boolean
+}
+
+type ParityCheck {
+  date: DateTime
+  duration: Int                # seconds
+  speed: String                # MB/s
+  status: ParityCheckStatus!
+  errors: Int
+  progress: Int                # percentage
+  correcting: Boolean
+  paused: Boolean
+  running: Boolean
+}
+```
+
+### Docker
+
+```graphql
+type Docker {
+  id: PrefixedID!
+  containers(skipCache: Boolean = false): [DockerContainer!]!
+  networks(skipCache: Boolean = false): [DockerNetwork!]!
+  portConflicts(skipCache: Boolean = false): DockerPortConflicts!
+  logs(id: PrefixedID!, since: DateTime, tail: Int): DockerContainerLogs!
+  container(id: PrefixedID!): DockerContainer
+  organizer(skipCache: Boolean = false): ResolvedOrganizerV1!
+  containerUpdateStatuses: [ExplicitStatusItem!]!
+}
+
+type DockerContainer {
+  id: PrefixedID!
+  names: [String!]!
+  image: String!
+  imageId: String!
+  command: String!
+  created: Int!
+  ports: [ContainerPort!]!
+  lanIpPorts: [String!]
+  sizeRootFs: BigInt           # Total size in bytes
+  sizeRw: BigInt               # Writable layer size
+  sizeLog: BigInt              # Log size
+  labels: JSON
+  state: ContainerState!
+  status: String!
+  hostConfig: ContainerHostConfig
+  networkSettings: JSON
+  mounts: [JSON!]
+  autoStart: Boolean!
+  autoStartOrder: Int
+  autoStartWait: Int           # seconds
+  templatePath: String
+  projectUrl: String
+  registryUrl: String
+  supportUrl: String
+  iconUrl: String
+  webUiUrl: String
+  shell: String
+  templatePorts: [ContainerPort!]
+  isOrphaned: Boolean!
+  isUpdateAvailable: Boolean
+  isRebuildReady: Boolean
+  tailscaleEnabled: Boolean!
+  tailscaleStatus(forceRefresh: Boolean = false): TailscaleStatus
+}
+
+type DockerContainerStats {
+  id: PrefixedID!
+  cpuPercent: Float!
+  memUsage: String!            # e.g., "100MB / 1GB"
+  memPercent: Float!
+  netIO: String!               # e.g., "100MB / 1GB"
+  blockIO: String!             # e.g., "100MB / 1GB"
+}
+
+type ContainerPort {
+  ip: String
+  privatePort: Port
+  publicPort: Port
+  type: ContainerPortType!
+}
+
+type DockerContainerLogs {
+  containerId: PrefixedID!
+  lines: [DockerContainerLogLine!]!
+  cursor: DateTime
+}
+
+type DockerContainerLogLine {
+  timestamp: DateTime!
+  message: String!
+}
+```
+
+### VM
+
+```graphql
+type Vms {
+  id: PrefixedID!
+  domains: [VmDomain!]
+  domain: [VmDomain!]
+}
+
+type VmDomain {
+  id: PrefixedID!              # UUID
+  name: String
+  state: VmState!
+  uuid: String @deprecated     # Use id instead
+}
+```
+
+### Info (System Information)
+
+```graphql
+type Info {
+  id: PrefixedID!
+  time: DateTime!
+  baseboard: InfoBaseboard!
+  cpu: InfoCpu!
+  devices: InfoDevices!
+  display: InfoDisplay!
+  machineId: ID
+  memory: InfoMemory!
+  os: InfoOs!
+  system: InfoSystem!
+  versions: InfoVersions!
+}
+
+type InfoVersions {
+  id: PrefixedID!
+  core: CoreVersions!
+  packages: PackageVersions
+}
+
+type CoreVersions {
+  unraid: String
+  api: String
+  kernel: String
+}
+
+type PackageVersions {
+  openssl: String
+  node: String
+  npm: String
+  pm2: String
+  git: String
+  nginx: String
+  php: String
+  docker: String
+}
+
+type InfoCpu {
+  id: PrefixedID!
+  manufacturer: String
+  brand: String
+  vendor: String
+  family: String
+  model: String
+  stepping: Int
+  revision: String
+  voltage: String
+  speed: Float                 # GHz
+  speedmin: Float
+  speedmax: Float
+  threads: Int
+  cores: Int
+  processors: Int
+  socket: String
+  cache: JSON
+  flags: [String!]
+  topology: [[[Int!]!]!]!
+  packages: CpuPackages!
+}
+
+type InfoMemory {
+  id: PrefixedID!
+  layout: [MemoryLayout!]!
+}
+
+type MemoryLayout {
+  id: PrefixedID!
+  size: BigInt!                # bytes
+  bank: String
+  type: String                 # e.g., DDR4
+  clockSpeed: Int              # MHz
+  partNum: String
+  serialNum: String
+  manufacturer: String
+  formFactor: String
+  voltageConfigured: Int       # mV
+  voltageMin: Int
+  voltageMax: Int
+}
+
+type InfoOs {
+  id: PrefixedID!
+  platform: String
+  distro: String
+  release: String
+  codename: String
+  kernel: String
+  arch: String
+  hostname: String
+  fqdn: String
+  build: String
+  servicepack: String
+  uptime: String               # ISO string
+  logofile: String
+  serial: String
+  uefi: Boolean
+}
+
+type InfoBaseboard {
+  id: PrefixedID!
+  manufacturer: String
+  model: String
+  version: String
+  serial: String
+  assetTag: String
+  memMax: Float                # bytes
+  memSlots: Float
+}
+
+type InfoSystem {
+  id: PrefixedID!
+  manufacturer: String
+  model: String
+  version: String
+  serial: String
+  uuid: String
+  sku: String
+  virtual: Boolean
+}
+
+type InfoDisplay {
+  id: PrefixedID!
+  case: InfoDisplayCase!
+  theme: ThemeName!
+  unit: Temperature!
+  scale: Boolean
+  tabs: Boolean
+  resize: Boolean
+  wwn: Boolean
+  total: Boolean
+  usage: Boolean
+  text: Boolean
+  warning: Int!                # Temperature threshold
+  critical: Int!
+  hot: Int!
+  max: Int
+  locale: String
+}
+
+type InfoDevices {
+  id: PrefixedID!
+  gpu: [InfoGpu!]
+  network: [InfoNetwork!]
+  pci: [InfoPci!]
+  usb: [InfoUsb!]
+}
+```
+
+### Metrics
+
+```graphql
+type Metrics {
+  id: PrefixedID!
+  cpu: CpuUtilization
+  memory: MemoryUtilization
+}
+
+type CpuUtilization {
+  id: PrefixedID!
+  percentTotal: Float!
+  cpus: [CpuLoad!]!
+}
+
+type CpuLoad {
+  percentTotal: Float!
+  percentUser: Float!
+  percentSystem: Float!
+  percentNice: Float!
+  percentIdle: Float!
+  percentIrq: Float!
+  percentGuest: Float!
+  percentSteal: Float!
+}
+
+type CpuPackages {
+  id: PrefixedID!
+  totalPower: Float!           # Watts
+  power: [Float!]!             # Per package
+  temp: [Float!]!              # °C per package
+}
+
+type MemoryUtilization {
+  id: PrefixedID!
+  total: BigInt!               # bytes
+  used: BigInt!
+  free: BigInt!
+  available: BigInt!
+  active: BigInt!
+  buffcache: BigInt!
+  percentTotal: Float!
+  swapTotal: BigInt!
+  swapUsed: BigInt!
+  swapFree: BigInt!
+  percentSwapTotal: Float!
+}
+```
+
+### Notifications
+
+```graphql
+type Notifications {
+  id: PrefixedID!
+  overview: NotificationOverview!
+  list(filter: NotificationFilter!): [Notification!]!
+  warningsAndAlerts: [Notification!]!
+}
+
+type NotificationOverview {
+  unread: NotificationCounts!
+  archive: NotificationCounts!
+}
+
+type NotificationCounts {
+  info: Int!
+  warning: Int!
+  alert: Int!
+  total: Int!
+}
+
+type Notification {
+  id: PrefixedID!
+  title: String!               # aka 'event'
+  subject: String!
+  description: String!
+  importance: NotificationImportance!
+  link: String
+  type: NotificationType!
+  timestamp: String
+  formattedTimestamp: String
+}
+```
+
+### UPS
+
+```graphql
+type UPSDevice {
+  id: ID!
+  name: String!
+  model: String!
+  status: String!              # Online, On Battery, Low Battery, etc.
+  battery: UPSBattery!
+  power: UPSPower!
+}
+
+type UPSBattery {
+  chargeLevel: Int!            # 0-100%
+  estimatedRuntime: Int!       # seconds
+  health: String!              # Good, Replace, Unknown
+}
+
+type UPSPower {
+  inputVoltage: Float!         # Volts
+  outputVoltage: Float!        # Volts
+  loadPercentage: Int!         # 0-100%
+}
+
+type UPSConfiguration {
+  service: String
+  upsCable: String
+  customUpsCable: String
+  upsType: String
+  device: String
+  overrideUpsCapacity: Int
+  batteryLevel: Int
+  minutes: Int
+  timeout: Int
+  killUps: String
+  nisIp: String
+  netServer: String
+  upsName: String
+  modelName: String
+}
+```
+
+### Shares
+
+```graphql
+type Share {
+  id: PrefixedID!
+  name: String
+  free: BigInt                 # KB
+  used: BigInt                 # KB
+  size: BigInt                 # KB
+  include: [String!]
+  exclude: [String!]
+  cache: Boolean
+  nameOrig: String
+  comment: String
+  allocator: String
+  splitLevel: String
+  floor: String
+  cow: String
+  color: String
+  luksStatus: String
+}
+```
+
+### Physical Disks
+
+```graphql
+type Disk {
+  id: PrefixedID!
+  device: String!              # e.g., /dev/sdb
+  type: String!                # SSD, HDD
+  name: String!                # Model name
+  vendor: String!
+  size: Float!                 # bytes
+  bytesPerSector: Float!
+  totalCylinders: Float!
+  totalHeads: Float!
+  totalSectors: Float!
+  totalTracks: Float!
+  tracksPerCylinder: Float!
+  sectorsPerTrack: Float!
+  firmwareRevision: String!
+  serialNum: String!
+  interfaceType: DiskInterfaceType!
+  smartStatus: DiskSmartStatus!
+  temperature: Float           # Celsius
+  partitions: [DiskPartition!]!
+  isSpinning: Boolean!
+}
+
+type DiskPartition {
+  name: String!
+  fsType: DiskFsType!
+  size: Float!                 # bytes
+}
+```
+
+### Registration & Vars
+
+```graphql
+type Registration {
+  id: PrefixedID!
+  type: registrationType
+  keyFile: KeyFile
+  state: RegistrationState
+  expiration: String
+  updateExpiration: String
+}
+
+type Vars {
+  id: PrefixedID!
+  version: String              # Unraid version
+  name: String                 # Hostname
+  timeZone: String
+  comment: String
+  useSsl: Boolean
+  port: Int                    # HTTP port
+  portssl: Int                 # HTTPS port
+  # ... many more configuration variables
+}
+```
+
+### Users & API Keys
+
+```graphql
+type UserAccount {
+  id: PrefixedID!
+  name: String!
+  description: String!
+  roles: [Role!]!
+  permissions: [Permission!]
+}
+
+type ApiKey {
+  id: PrefixedID!
+  key: String!
+  name: String!
+  description: String
+  roles: [Role!]!
+  createdAt: String!
+  permissions: [Permission!]!
+}
+
+type Permission {
+  resource: Resource!
+  actions: [AuthAction!]!
+}
+```
+
+### Network & Cloud
+
+```graphql
+type Network {
+  id: PrefixedID!
+  accessUrls: [AccessUrl!]
+}
+
+type AccessUrl {
+  type: URL_TYPE!
+  name: String
+  ipv4: URL
+  ipv6: URL
+}
+
+type Cloud {
+  error: String
+  apiKey: ApiKeyResponse!
+  relay: RelayResponse
+  minigraphql: MinigraphqlResponse!
+  cloud: CloudResponse!
+  allowedOrigins: [String!]!
+}
+
+type Connect {
+  id: PrefixedID!
+  dynamicRemoteAccess: DynamicRemoteAccessStatus!
+  settings: ConnectSettings!
+}
+
+type RemoteAccess {
+  accessType: WAN_ACCESS_TYPE!
+  forwardType: WAN_FORWARD_TYPE
+  port: Int
+}
+```
+
+---
+
+## Queries
+
+### System Queries
+
+```graphql
+# Check if server is online
+query { online }
+
+# Get system information
+query {
+  info {
+    time
+    os { hostname uptime kernel }
+    cpu { brand cores threads }
+    memory { layout { size type clockSpeed manufacturer } }
+    versions { core { unraid api kernel } }
+    baseboard { manufacturer model memMax memSlots }
+    display { theme unit warning critical }
+  }
+}
+
+# Get system metrics
+query {
+  metrics {
+    cpu { percentTotal cpus { percentTotal percentUser percentSystem } }
+    memory { total used free percentTotal swapTotal swapUsed }
+  }
+}
+
+# Get system variables
+query {
+  vars {
+    version
+    name
+    timeZone
+    useSsl
+    port
+    portssl
+  }
+}
+
+# Get registration info
+query {
+  registration {
+    type
+    state
+    expiration
+  }
+}
+```
+
+### Array Queries
 
 ```graphql
 query {
   array {
     state
     capacity {
-      kilobytes {
-        free
-        used
-        total
-      }
-      disks {
-        free
-        used
-        total
-      }
+      kilobytes { free used total }
+      disks { free used total }
     }
-    boot {
-      id
-      name
-      device
-      size
-      temp
-      type
-    }
-    parities {
-      id
-      name
-      device
-      size
+    parityCheckStatus {
       status
-      type
+      progress
+      running
+      paused
+      errors
     }
+    boot { name device size }
+    parities { name device size status type temp }
     disks {
-      id
-      name
-      device
-      size
-      status
-      type
-      temp
-      fsSize
-      fsFree
-      fsUsed
-      numReads
-      numWrites
-      numErrors
+      name device size status type temp
+      fsSize fsFree fsUsed
+      numReads numWrites numErrors
+      isSpinning
     }
-    caches {
-      id
-      name
-      device
-      size
-      temp
-      status
-      type
-      fsSize
-      fsFree
-      fsUsed
-    }
-  }
-}
-```
-
-#### Array Control Mutations
-
-```graphql
-# Start the array
-mutation {
-  array {
-    setState(input: { desiredState: START }) {
-      state
-    }
+    caches { name device size status type temp fsSize fsFree fsUsed }
   }
 }
 
-# Stop the array
-mutation {
-  array {
-    setState(input: { desiredState: STOP }) {
-      state
-    }
-  }
-}
+# Get parity history
+query { parityHistory { date duration speed status errors } }
 
-# Add a disk to the array
-mutation {
-  array {
-    addDiskToArray(input: { diskId: "disk_id", slot: "disk1" }) {
-      state
-    }
-  }
-}
-
-# Remove a disk from the array
-mutation {
-  array {
-    removeDiskFromArray(input: { diskId: "disk_id" }) {
-      state
-    }
-  }
-}
-```
-
-### Disk Operations
-
-The modern API provides comprehensive disk information and operations:
-
-- View detailed disk information including hardware specs
-- Monitor SMART status and temperature
-- Access partition information
-- Check spinning status for HDDs
-- Mount and unmount individual disks
-
-Example query to get comprehensive disk information:
-
-```graphql
+# Get physical disks
 query {
   disks {
-    id
-    device
-    name
-    type
-    size
-    vendor
-    firmwareRevision
-    serialNum
-    interfaceType
-    smartStatus
-    temperature
+    device name vendor size
+    interfaceType smartStatus temperature
     isSpinning
-    partitions {
-      name
-      fsType
-      size
-    }
+    partitions { name fsType size }
   }
 }
 ```
 
-#### Individual Disk Query
-
-```graphql
-query {
-  disk(id: "disk_id") {
-    id
-    device
-    name
-    type
-    size
-    vendor
-    firmwareRevision
-    serialNum
-    interfaceType
-    smartStatus
-    temperature
-    isSpinning
-    partitions {
-      name
-      fsType
-      size
-    }
-  }
-}
-```
-
-### User Management
-
-Manage users and their permissions:
-
-- Add and delete users
-- Assign roles and permissions
-- Manage API keys
-
-Example to create a new user:
-
-```graphql
-mutation {
-  addUser(input: {
-    name: "john",
-    password: "securepassword",
-    description: "John Doe"
-  }) {
-    id
-    name
-    roles
-  }
-}
-```
-
-### Docker Management
-
-The modern API provides comprehensive Docker container management:
-
-- View detailed container information
-- Start and stop containers
-- Monitor container status and ports
-- Access container configuration
-
-Example to get all Docker containers:
+### Docker Queries
 
 ```graphql
 query {
   docker {
     containers {
-      id
-      names
-      image
-      state
-      status
-      autoStart
-      ports {
-        ip
-        privatePort
-        publicPort
-        type
-      }
+      id names image state status
+      autoStart autoStartOrder
+      ports { ip privatePort publicPort type }
+      isUpdateAvailable isOrphaned
+      webUiUrl iconUrl
     }
+  }
+}
+
+# Get single container
+query {
+  docker {
+    container(id: "container:abc123") {
+      names image state status
+      sizeRootFs sizeRw sizeLog
+    }
+  }
+}
+
+# Get container logs
+query {
+  docker {
+    logs(id: "container:abc123", tail: 100) {
+      lines { timestamp message }
+      cursor
+    }
+  }
+}
+
+# Get container update statuses
+query {
+  docker {
+    containerUpdateStatuses { name updateStatus }
   }
 }
 ```
 
-#### Docker Container Control
-
-```graphql
-# Start a container
-mutation {
-  docker {
-    start(id: "container_id") {
-      id
-      state
-      status
-    }
-  }
-}
-
-# Stop a container
-mutation {
-  docker {
-    stop(id: "container_id") {
-      id
-      state
-      status
-    }
-  }
-}
-```
-
-### Virtual Machines
-
-The modern API provides comprehensive virtual machine management:
-
-- View detailed VM information
-- Start, stop, pause, and resume VMs
-- Force stop and reboot VMs
-- Monitor VM status
-
-Example to get all VMs:
+### VM Queries
 
 ```graphql
 query {
   vms {
-    domain {
-      uuid
-      name
-      state
+    domains {
+      id name state
     }
   }
 }
 ```
 
-#### Virtual Machine Control
+### Notification Queries
 
 ```graphql
-# Start a VM
-mutation {
-  vm {
-    start(id: "vm_id") {
-      uuid
-      name
-      state
+query {
+  notifications {
+    overview {
+      unread { info warning alert total }
+      archive { info warning alert total }
     }
-  }
-}
-
-# Stop a VM
-mutation {
-  vm {
-    stop(id: "vm_id") {
-      uuid
-      name
-      state
-    }
-  }
-}
-
-# Force stop a VM
-mutation {
-  vm {
-    forceStop(id: "vm_id") {
-      uuid
-      name
-      state
-    }
-  }
-}
-
-# Pause a VM
-mutation {
-  vm {
-    pause(id: "vm_id") {
-      uuid
-      name
-      state
-    }
-  }
-}
-
-# Resume a VM
-mutation {
-  vm {
-    resume(id: "vm_id") {
-      uuid
-      name
-      state
-    }
-  }
-}
-
-# Reboot a VM
-mutation {
-  vm {
-    reboot(id: "vm_id") {
-      uuid
-      name
-      state
+    warningsAndAlerts { title subject description importance timestamp }
+    list(filter: { type: UNREAD, offset: 0, limit: 20 }) {
+      id title subject description importance timestamp
     }
   }
 }
 ```
 
-### Remote Access
-
-Configure remote access to the Unraid server:
-
-- Set up dynamic remote access
-- Configure access URLs
-- Manage allowed origins
-
-### Notifications
-
-The API provides a comprehensive notification system:
-
-- Create and manage notifications
-- Filter notifications by importance
-- Archive and unarchive notifications
-
-Example to create a notification:
+### Share Queries
 
 ```graphql
-mutation {
-  createNotification(input: {
-    title: "Disk Warning",
-    subject: "High Temperature",
-    description: "Disk temperature is above threshold",
-    importance: WARNING
-  }) {
-    id
-    title
-    importance
+query {
+  shares {
+    name free used size
+    include exclude cache
+    comment
   }
 }
 ```
 
-### UPS Monitoring
-
-The API provides comprehensive UPS monitoring capabilities:
-
-- Monitor UPS status and battery levels
-- Track power consumption and load
-- Get estimated runtime information
-- Monitor UPS health status
-
-Example to get UPS information:
+### UPS Queries
 
 ```graphql
 query {
   upsDevices {
-    id
-    name
-    model
-    status
-    battery {
-      chargeLevel
-      estimatedRuntime
-      health
-    }
-    power {
-      inputVoltage
-      outputVoltage
-      loadPercentage
-    }
+    id name model status
+    battery { chargeLevel estimatedRuntime health }
+    power { inputVoltage outputVoltage loadPercentage }
   }
-}
-```
-
-Example to get UPS configuration:
-
-```graphql
-query {
   upsConfiguration {
-    service
-    upsType
-    device
-    batteryLevel
-    minutes
-    timeout
-    modelName
+    service upsCable upsType device
+    batteryLevel minutes timeout
   }
 }
 ```
 
-### Disk Sleep State Monitoring
-
-Monitor disk spinning status to optimize power consumption:
-
-- Check which disks are currently spinning or sleeping
-- Monitor disk temperatures
-- Identify rotational vs solid-state drives
-
-**Important**: Querying disk information may wake up sleeping disks. Use with caution if you want to preserve disk sleep states.
-
-Example to check disk sleep status:
+### User & API Key Queries
 
 ```graphql
 query {
+  me { id name description roles }
+  apiKeys { id name description roles createdAt }
+  apiKeyPossibleRoles
+  apiKeyPossiblePermissions { resource actions }
+}
+```
+
+### Other Queries
+
+```graphql
+# Services
+query { services { name online version uptime { timestamp } } }
+
+# Plugins
+query { plugins { name version hasApiModule hasCliModule } }
+
+# Log files
+query { logFiles { name path size modifiedAt } }
+query { logFile(path: "/var/log/syslog", lines: 100) { path content totalLines } }
+
+# Flash drive
+query { flash { guid vendor product } }
+
+# Settings
+query { settings { unified { dataSchema uiSchema values } } }
+
+# Cloud/Connect status
+query {
+  cloud { error apiKey { valid } minigraphql { status } }
+  connect { dynamicRemoteAccess { enabledType runningType error } }
+  remoteAccess { accessType forwardType port }
+  network { accessUrls { type name ipv4 ipv6 } }
+}
+```
+
+---
+
+## Mutations
+
+### Array Mutations
+
+```graphql
+# Start array
+mutation {
   array {
-    disks {
-      name
-      device
-      isSpinning
-      rotational
-      temp
-    }
-    parities {
-      name
-      device
-      isSpinning
-      rotational
-      temp
-    }
-    caches {
-      name
-      device
-      isSpinning
-      rotational
-      temp
-    }
-  }
-  disks {
-    name
-    device
-    isSpinning
-    temperature
-    type
+    setState(input: { desiredState: START }) { state }
   }
 }
-```
 
-## API Reference
-
-### Queries
-
-The API provides the following top-level queries:
-
-| Query | Description |
-|-------|-------------|
-| `apiKeys` | List all API keys |
-| `apiKey(id: ID!)` | Get a specific API key |
-| `array` | Get information about the Unraid array |
-| `parityHistory` | Get historical parity check data |
-| `disk(id: ID!)` | Get information about a specific disk |
-| `disks` | Get information about all disks |
-| `dockerContainers(all: Boolean)` | Get Docker containers |
-| `dockerNetworks(all: Boolean)` | Get Docker networks |
-| `info` | Get system information |
-| `me` | Get current user information |
-| `notifications` | Get system notifications |
-| `shares` | Get network shares |
-| `unassignedDevices` | Get unassigned devices |
-| `users(input: usersInput)` | Get all users |
-| `vms` | Get virtual machines |
-| `upsDevices` | Get all UPS devices |
-| `upsDeviceById(id: String!)` | Get a specific UPS device |
-| `upsConfiguration` | Get UPS configuration settings |
-
-### Mutations
-
-The API provides the following top-level mutations:
-
-| Mutation | Description |
-|----------|-------------|
-| `createApiKey(input: CreateApiKeyInput!)` | Create a new API key |
-| `addPermission(input: AddPermissionInput!)` | Add a permission |
-| `addRoleForUser(input: AddRoleForUserInput!)` | Add a role to a user |
-| `addRoleForApiKey(input: AddRoleForApiKeyInput!)` | Add a role to an API key |
-| `startArray` | Start the array |
-| `stopArray` | Stop the array |
-| `addDiskToArray(input: arrayDiskInput)` | Add a disk to the array |
-| `removeDiskFromArray(input: arrayDiskInput)` | Remove a disk from the array |
-| `startParityCheck(correct: Boolean)` | Start a parity check |
-| `pauseParityCheck` | Pause a running parity check |
-| `resumeParityCheck` | Resume a paused parity check |
-| `cancelParityCheck` | Cancel a running parity check |
-| `addUser(input: addUserInput!)` | Add a new user |
-| `deleteUser(input: deleteUserInput!)` | Delete a user |
-| `createNotification(input: NotificationData!)` | Create a notification |
-| `archiveNotification(id: String!)` | Archive a notification |
-
-### Subscriptions
-
-The API provides real-time updates via subscriptions:
-
-| Subscription | Description |
-|--------------|-------------|
-| `array` | Get real-time updates about the array |
-| `parityHistory` | Get real-time updates about parity check progress |
-| `dockerContainer(id: ID!)` | Get real-time updates about a specific Docker container |
-| `dockerContainers` | Get real-time updates about all Docker containers |
-| `notificationAdded` | Get notified when a new notification is added |
-| `user(id: ID!)` | Get real-time updates about a specific user |
-| `users` | Get real-time updates about all users |
-
-## Custom Types
-
-The API uses several custom types:
-
-| Type | Description |
-|------|-------------|
-| `JSON` | Represents JSON values |
-| `Long` | Represents 52-bit integers |
-| `UUID` | Represents a Universally Unique Identifier |
-| `DateTime` | Represents a date-time string at UTC |
-| `Port` | Represents a valid TCP port (0-65535) |
-| `URL` | Represents a standard URL format |
-
-## Enumerations
-
-Key enumerations used in the API:
-
-| Enumeration | Description |
-|-------------|-------------|
-| `Resource` | Available resources for permissions (e.g., `api_key`, `array`, `disk`) |
-| `Role` | Available roles for API keys and users (`admin`, `connect`, `guest`) |
-| `ArrayState` | Possible states of the array (e.g., `STARTED`, `STOPPED`) |
-| `ArrayDiskStatus` | Possible statuses for disks in the array |
-| `DiskInterfaceType` | Types of disk interfaces (`SAS`, `SATA`, `USB`, etc.) |
-| `ContainerState` | Possible states for Docker containers (`RUNNING`, `EXITED`) |
-| `VmState` | Possible states for virtual machines |
-| `Importance` | Importance levels for notifications (`ALERT`, `INFO`, `WARNING`) |
-
-## Common Use Cases and Examples
-
-### System Monitoring
-
-#### CPU, RAM and System Information
-
-Monitor CPU usage, RAM usage, and general system information:
-
-```graphql
-query {
-  info {
-    cpu {
-      manufacturer
-      brand
-      cores
-      threads
-      speed
-      speedmax
-    }
-    memory {
-      total
-      free
-      used
-      active
-      available
-      swaptotal
-      swapused
-      swapfree
-    }
-    system {
-      manufacturer
-      model
-      serial
-    }
-    os {
-      uptime
-      distro
-      release
-      kernel
-    }
-  }
-}
-```
-
-#### CPU and Motherboard Temperature
-
-The schema doesn't have direct temperature sensors for CPU and motherboard, but you can access device information which might contain this data:
-
-```graphql
-query {
-  info {
-    devices {
-      pci {
-        id
-        vendorname
-        productname
-      }
-    }
-    cpu {
-      manufacturer
-      brand
-      cores
-      temperature # Note: This field may not be directly available
-    }
-  }
-}
-```
-
-#### Array Usage and Disk Information
-
-Monitor array usage, disk health, and status:
-
-```graphql
-query {
+# Stop array
+mutation {
   array {
-    state
-    capacity {
-      kilobytes {
-        free
-        used
-        total
-      }
-    }
-    parities {
-      id
-      name
-      size
-      temp
-      numErrors
-    }
-    disks {
-      id
-      name
-      size
-      temp
-      numErrors
-      fsUsed
-      fsFree
-      fsSize
-      status
-    }
-    caches {
-      id
-      name
-      size
-      temp
-      numErrors
-    }
+    setState(input: { desiredState: STOP }) { state }
   }
 }
-```
 
-#### Individual Disk Information
-
-Get detailed information about a specific disk:
-
-```graphql
-query {
-  disk(id: "yourDiskId") {
-    device
-    name
-    size
-    temperature
-    smartStatus
-    partitions {
-      name
-      fsType
-      size
-    }
-  }
-}
-```
-
-#### Monitor Parity Check Status
-
-Get information about parity checks:
-
-```graphql
-query {
-  parityHistory {
-    date
-    duration
-    speed
-    status
-    errors
-  }
-  
-  # For active parity check status, use the array subscription
-  # subscription {
-  #   array {
-  #     state
-  #     # Additional fields related to parity check status
-  #   }
-  # }
-}
-```
-
-#### Real-time System Monitoring with Subscriptions
-
-Use subscriptions for real-time monitoring:
-
-```graphql
-subscription {
-  info {
-    cpu {
-      cores
-      threads
-      speed
-    }
-    memory {
-      total
-      used
-      free
-    }
-  }
-  
+# Add disk to array
+mutation {
   array {
-    state
-    capacity {
-      kilobytes {
-        used
-        free
-      }
+    addDiskToArray(input: { id: "disk:abc", slot: 1 }) { state }
+  }
+}
+
+# Remove disk from array (array must be stopped)
+mutation {
+  array {
+    removeDiskFromArray(input: { id: "disk:abc" }) { state }
+  }
+}
+
+# Mount/unmount disk
+mutation {
+  array {
+    mountArrayDisk(id: "disk:1") { id name isSpinning }
+    unmountArrayDisk(id: "disk:1") { id name isSpinning }
+  }
+}
+
+# Clear disk statistics
+mutation {
+  array {
+    clearArrayDiskStatistics(id: "disk:1")
+  }
+}
+```
+
+### Parity Check Mutations
+
+```graphql
+mutation {
+  parityCheck {
+    start(correct: false)  # or true for correcting parity
+  }
+}
+
+mutation { parityCheck { pause } }
+mutation { parityCheck { resume } }
+mutation { parityCheck { cancel } }
+```
+
+### Docker Mutations
+
+```graphql
+# Start container
+mutation {
+  docker {
+    start(id: "container:abc123") { id names state status }
+  }
+}
+
+# Stop container
+mutation {
+  docker {
+    stop(id: "container:abc123") { id names state status }
+  }
+}
+
+# Pause/unpause container
+mutation {
+  docker {
+    pause(id: "container:abc123") { id state }
+    unpause(id: "container:abc123") { id state }
+  }
+}
+
+# Remove container
+mutation {
+  docker {
+    removeContainer(id: "container:abc123", withImage: false)
+  }
+}
+
+# Update container to latest image
+mutation {
+  docker {
+    updateContainer(id: "container:abc123") { id names image }
+  }
+}
+
+# Update multiple containers
+mutation {
+  docker {
+    updateContainers(ids: ["container:abc", "container:def"]) { id names }
+  }
+}
+
+# Update all containers
+mutation {
+  docker {
+    updateAllContainers { id names }
+  }
+}
+
+# Update auto-start configuration
+mutation {
+  docker {
+    updateAutostartConfiguration(entries: [
+      { id: "container:abc", autoStart: true, wait: 5 }
+    ])
+  }
+}
+```
+
+### VM Mutations
+
+```graphql
+mutation { vm { start(id: "vm:uuid") } }      # Returns Boolean!
+mutation { vm { stop(id: "vm:uuid") } }
+mutation { vm { pause(id: "vm:uuid") } }
+mutation { vm { resume(id: "vm:uuid") } }
+mutation { vm { forceStop(id: "vm:uuid") } }
+mutation { vm { reboot(id: "vm:uuid") } }
+mutation { vm { reset(id: "vm:uuid") } }
+```
+
+### API Key Mutations
+
+```graphql
+# Create API key
+mutation {
+  apiKey {
+    create(input: {
+      name: "My Key"
+      description: "For my app"
+      roles: [ADMIN]
+    }) {
+      id key name roles
     }
   }
 }
-```
 
-### Container and VM Management
-
-#### Docker Container Control
-
-List and control Docker containers:
-
-```graphql
-query {
-  dockerContainers {
-    id
-    names
-    image
-    state
-    status
-    ports {
-      ip
-      privatePort
-      publicPort
-    }
-    autoStart
+# Update API key
+mutation {
+  apiKey {
+    update(input: { id: "apikey:123", name: "New Name" }) { id name }
   }
 }
 
-# To control containers, you would need appropriate mutations
-# Note: The schema doesn't show specific container start/stop mutations
-# but you can use Docker-related mutations that might be available
-```
-
-#### Virtual Machine Control
-
-Monitor virtual machines:
-
-```graphql
-query {
-  vms {
-    domain {
-      uuid
-      name
-      state
-    }
+# Delete API keys
+mutation {
+  apiKey {
+    delete(input: { ids: ["apikey:123", "apikey:456"] })
   }
 }
 
-# To control VMs, you would need appropriate mutations
-# Note: The schema doesn't show specific VM start/stop mutations
+# Add/remove role
+mutation { apiKey { addRole(input: { apiKeyId: "apikey:123", role: VIEWER }) } }
+mutation { apiKey { removeRole(input: { apiKeyId: "apikey:123", role: VIEWER }) } }
 ```
 
-#### Docker Networks
-
-Examine Docker networks:
+### Notification Mutations
 
 ```graphql
-query {
-  dockerNetworks {
-    id
-    name
-    driver
-    scope
-    internal
-    attachable
-  }
-}
-```
-
-### Notification Management
-
-Create and manage notifications:
-
-```graphql
+# Create notification
 mutation {
   createNotification(input: {
-    title: "Disk Warning",
-    subject: "High Temperature",
-    description: "Disk temperature is above threshold",
-    importance: WARNING
-  }) {
-    id
-    title
-    importance
+    title: "Test"
+    subject: "Test Subject"
+    description: "Test description"
+    importance: INFO
+  }) { id }
+}
+
+# Archive notification
+mutation { archiveNotification(id: "notification:123") { id } }
+mutation { archiveNotifications(ids: ["notification:123"]) { unread { total } } }
+mutation { archiveAll(importance: WARNING) { unread { total } } }
+
+# Unarchive
+mutation { unreadNotification(id: "notification:123") { id } }
+mutation { unarchiveNotifications(ids: ["notification:123"]) { archive { total } } }
+mutation { unarchiveAll(importance: INFO) { archive { total } } }
+
+# Delete
+mutation { deleteNotification(id: "notification:123", type: ARCHIVE) { unread { total } } }
+mutation { deleteArchivedNotifications { archive { total } } }
+```
+
+### Settings Mutations
+
+```graphql
+# Update settings
+mutation {
+  updateSettings(input: { /* JSON settings */ }) {
+    restartRequired
+    values
+    warnings
   }
 }
 
-query {
+# Configure UPS
+mutation {
+  configureUps(config: {
+    service: ENABLE
+    upsCable: USB
+    upsType: USB
+    device: "/dev/usb/hiddev0"
+    batteryLevel: 10
+    minutes: 5
+  })
+}
+```
+
+### Theme Mutations
+
+```graphql
+mutation {
+  customization {
+    setTheme(theme: black) { name }
+  }
+}
+```
+
+---
+
+## Subscriptions
+
+Real-time updates via WebSocket:
+
+```graphql
+# Array state changes
+subscription { arraySubscription { state capacity { kilobytes { free used total } } } }
+
+# Parity history updates
+subscription { parityHistorySubscription { date status progress errors } }
+
+# Docker container stats (live)
+subscription {
+  dockerContainerStats {
+    id cpuPercent memUsage memPercent netIO blockIO
+  }
+}
+
+# System metrics
+subscription { systemMetricsCpu { percentTotal cpus { percentTotal } } }
+subscription { systemMetricsCpuTelemetry { totalPower power temp } }
+subscription { systemMetricsMemory { total used free percentTotal } }
+
+# Notifications
+subscription { notificationAdded { id title subject importance } }
+subscription { notificationsOverview { unread { total } archive { total } } }
+subscription { notificationsWarningsAndAlerts { title importance } }
+
+# UPS updates
+subscription { upsUpdates { id status battery { chargeLevel } } }
+
+# Log file streaming
+subscription { logFile(path: "/var/log/syslog") { content } }
+
+# Server/owner updates
+subscription { ownerSubscription { username avatar } }
+subscription { serversSubscription { name status } }
+```
+
+---
+
+## Example: Complete System Status Query
+
+```graphql
+query SystemStatus {
+  online
+  info {
+    os { hostname uptime }
+    cpu { brand cores threads }
+    versions { core { unraid api } }
+  }
+  metrics {
+    cpu { percentTotal }
+    memory { percentTotal }
+  }
+  array {
+    state
+    capacity { kilobytes { free used total } }
+    parityCheckStatus { status progress running }
+  }
+  docker {
+    containers { names state isUpdateAvailable }
+  }
+  vms {
+    domains { name state }
+  }
   notifications {
-    overview {
-      unread {
-        info
-        warning
-        alert
-        total
-      }
-    }
-    list(filter: {
-      importance: WARNING,
-      type: UNREAD,
-      offset: 0,
-      limit: 10
-    }) {
-      id
-      title
-      subject
-      description
-      timestamp
-    }
+    overview { unread { alert warning } }
+  }
+  upsDevices {
+    status
+    battery { chargeLevel }
   }
 }
 ```
 
-### User Management
+---
 
-```graphql
-query {
-  users {
-    id
-    name
-    description
-    roles
-  }
-}
+## Notes
 
-mutation {
-  addUser(input: {
-    name: "newuser",
-    password: "securepassword",
-    description: "New operator"
-  }) {
-    id
-    name
-    roles
-  }
-}
-```
-
-### Other Common Operations
-
-#### Start/Stop Array
-
-```graphql
-mutation {
-  startArray
-}
-
-mutation {
-  stopArray
-}
-```
-
-#### Parity Check Control
-
-```graphql
-mutation {
-  # Start a parity check
-  startParityCheck(correct: false) # Set to true to correct errors
-  
-  # Pause a running parity check
-  # pauseParityCheck
-  
-  # Resume a paused parity check
-  # resumeParityCheck
-  
-  # Cancel a running parity check
-  # cancelParityCheck
-}
-```
-
-## Best Practices
-
-1. **Rate Limiting**: Be mindful of the rate at which you make API requests to avoid performance impacts.
-2. **Error Handling**: Always handle potential errors in your API responses.
-3. **Permissions**: Only assign the minimum permissions required for your application.
-4. **Subscriptions**: Use subscriptions for real-time data instead of polling with queries.
-5. **API Keys**: Keep your API keys secure and rotate them periodically.
-
-## Additional Resources
-
-For more information about GraphQL and how to use it effectively, refer to the following resources:
-
-- [Official GraphQL Documentation](https://graphql.org/learn/)
-- [Unraid Documentation](https://docs.unraid.net/)
-- [GraphQL Clients](https://graphql.org/code/#graphql-clients)
+- All IDs use `PrefixedID` format: `serverIdentifier:resourceId`
+- Sizes in `ArrayDisk` and `Share` are in **kilobytes (KB)**
+- Sizes in `Disk` and `DiskPartition` are in **bytes**
+- Temperature values are in **Celsius** unless `InfoDisplay.unit` is `FAHRENHEIT`
+- The API uses nested mutation types (e.g., `array.setState`, `docker.start`)
+- VM mutations return `Boolean!`, not `VmDomain`
