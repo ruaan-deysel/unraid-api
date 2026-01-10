@@ -93,6 +93,7 @@ select = [
 ignore = [
     "PLR0913",  # Too many arguments
     "PLR2004",  # Magic value comparison
+    "PLC0415",  # Import not at top of file (used for lazy imports)
 ]
 
 [tool.ruff.lint.per-file-ignores]
