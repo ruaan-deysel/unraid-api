@@ -170,6 +170,7 @@ async with UnraidClient(host, api_key) as client:
 |--------|-------------|
 | `test_connection()` | Test if server is reachable |
 | `get_version()` | Get Unraid and API version |
+| `get_server_info()` | Get server info for device registration |
 | `query(query, variables)` | Execute GraphQL query |
 | `mutate(mutation, variables)` | Execute GraphQL mutation |
 | `start_container(id)` | Start Docker container |
@@ -187,6 +188,7 @@ async with UnraidClient(host, api_key) as client:
 
 ### Models
 
+- `ServerInfo` - Server info for HA device registration
 - `SystemInfo` - System information
 - `UnraidArray` - Array state and disks
 - `ArrayDisk` - Individual disk info

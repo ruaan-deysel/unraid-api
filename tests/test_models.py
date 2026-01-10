@@ -353,3 +353,222 @@ class TestForwardCompatibility:
         assert disk.id == "disk:1"
         assert disk.name == "Disk 1"
         assert not hasattr(disk, "unknown_field")
+
+
+class TestServerInfo:
+    """Tests for ServerInfo model."""
+
+    def test_server_info_default_values(self) -> None:
+        """Test ServerInfo with default values."""
+        from unraid_api.models import ServerInfo
+
+        info = ServerInfo()
+
+        assert info.uuid is None
+        assert info.hostname is None
+        assert info.manufacturer == "Lime Technology"
+        assert info.model is None
+        assert info.sw_version is None
+        assert info.hw_version is None
+        assert info.serial_number is None
+        assert info.api_version is None
+        assert info.lan_ip is None
+
+    def test_server_info_with_all_fields(self) -> None:
+        """Test ServerInfo with all fields populated."""
+        from unraid_api.models import ServerInfo
+
+        info = ServerInfo(
+            uuid="abc123-def456",
+            hostname="Tower",
+            manufacturer="Lime Technology",
+            model="Unraid 7.2.0",
+            sw_version="7.2.0",
+            hw_version="6.1.38-Unraid",
+            serial_number="ABC123",
+            hw_manufacturer="ASUS",
+            hw_model="Z690",
+            os_distro="Unraid",
+            os_release="7.2.0",
+            os_arch="x64",
+            api_version="4.29.2",
+            lan_ip="192.168.1.100",
+            local_url="http://192.168.1.100",
+            remote_url="https://myserver.myunraid.net",
+            license_type="Pro",
+            license_state="valid",
+            cpu_brand="Intel Core i7-12700K",
+            cpu_cores=12,
+            cpu_threads=20,
+        )
+
+        assert info.uuid == "abc123-def456"
+        assert info.hostname == "Tower"
+        assert info.manufacturer == "Lime Technology"
+        assert info.model == "Unraid 7.2.0"
+        assert info.sw_version == "7.2.0"
+        assert info.hw_version == "6.1.38-Unraid"
+        assert info.serial_number == "ABC123"
+        assert info.hw_manufacturer == "ASUS"
+        assert info.hw_model == "Z690"
+        assert info.os_distro == "Unraid"
+        assert info.os_release == "7.2.0"
+        assert info.os_arch == "x64"
+        assert info.api_version == "4.29.2"
+        assert info.lan_ip == "192.168.1.100"
+        assert info.local_url == "http://192.168.1.100"
+        assert info.remote_url == "https://myserver.myunraid.net"
+        assert info.license_type == "Pro"
+        assert info.license_state == "valid"
+        assert info.cpu_brand == "Intel Core i7-12700K"
+        assert info.cpu_cores == 12
+        assert info.cpu_threads == 20
+
+    def test_from_response_full_data(self) -> None:
+        """Test from_response with complete GraphQL response."""
+        from unraid_api.models import ServerInfo
+
+        response = {
+            "info": {
+                "system": {
+                    "uuid": "abc123-def456",
+                    "manufacturer": "Dell Inc.",
+                    "model": "PowerEdge R730",
+                    "serial": "SYS123",
+                },
+                "baseboard": {
+                    "manufacturer": "Dell",
+                    "model": "0HFG24",
+                    "serial": "BB456",
+                },
+                "os": {
+                    "hostname": "Tower",
+                    "distro": "Unraid",
+                    "release": "7.2.0",
+                    "kernel": "6.1.38-Unraid",
+                    "arch": "x64",
+                },
+                "cpu": {
+                    "manufacturer": "Intel",
+                    "brand": "Intel Xeon E5-2680",
+                    "cores": 12,
+                    "threads": 24,
+                },
+                "versions": {
+                    "core": {
+                        "unraid": "7.2.0",
+                        "api": "4.29.2",
+                    }
+                },
+            },
+            "server": {
+                "lanip": "192.168.1.100",
+                "localurl": "http://192.168.1.100",
+                "remoteurl": "https://myserver.myunraid.net",
+            },
+            "registration": {
+                "type": "Pro",
+                "state": "valid",
+            },
+        }
+
+        info = ServerInfo.from_response(response)
+
+        assert info.uuid == "abc123-def456"
+        assert info.hostname == "Tower"
+        assert info.manufacturer == "Lime Technology"
+        assert info.model == "Unraid 7.2.0"
+        assert info.sw_version == "7.2.0"
+        assert info.hw_version == "6.1.38-Unraid"
+        assert info.serial_number == "SYS123"
+        assert info.hw_manufacturer == "Dell Inc."
+        assert info.hw_model == "PowerEdge R730"
+        assert info.os_distro == "Unraid"
+        assert info.os_release == "7.2.0"
+        assert info.os_arch == "x64"
+        assert info.api_version == "4.29.2"
+        assert info.lan_ip == "192.168.1.100"
+        assert info.local_url == "http://192.168.1.100"
+        assert info.remote_url == "https://myserver.myunraid.net"
+        assert info.license_type == "Pro"
+        assert info.license_state == "valid"
+        assert info.cpu_brand == "Intel Xeon E5-2680"
+        assert info.cpu_cores == 12
+        assert info.cpu_threads == 24
+
+    def test_from_response_baseboard_fallback(self) -> None:
+        """Test from_response falls back to baseboard when system info is missing."""
+        from unraid_api.models import ServerInfo
+
+        response = {
+            "info": {
+                "system": {
+                    "uuid": "abc123",
+                    "manufacturer": None,
+                    "model": None,
+                    "serial": None,
+                },
+                "baseboard": {
+                    "manufacturer": "ASUS",
+                    "model": "Z690",
+                    "serial": "BBSERIAL123",
+                },
+                "os": {
+                    "hostname": "Tower",
+                    "distro": "Unraid",
+                    "release": "7.2.0",
+                    "kernel": "6.1.38-Unraid",
+                    "arch": "x64",
+                },
+                "cpu": {
+                    "brand": "Intel Core i7",
+                    "cores": 8,
+                    "threads": 16,
+                },
+                "versions": {"core": {"unraid": "7.2.0", "api": "4.29.2"}},
+            },
+            "server": {"lanip": "192.168.1.100"},
+            "registration": {"type": "Basic", "state": "valid"},
+        }
+
+        info = ServerInfo.from_response(response)
+
+        # Should fall back to baseboard values
+        assert info.hw_manufacturer == "ASUS"
+        assert info.hw_model == "Z690"
+        assert info.serial_number == "BBSERIAL123"
+
+    def test_from_response_empty_data(self) -> None:
+        """Test from_response with empty/missing data."""
+        from unraid_api.models import ServerInfo
+
+        response: dict[str, object] = {}
+
+        info = ServerInfo.from_response(response)
+
+        assert info.uuid is None
+        assert info.hostname is None
+        assert info.manufacturer == "Lime Technology"
+        assert info.model == "Unraid Unknown"
+        assert info.sw_version == "Unknown"
+
+    def test_from_response_partial_data(self) -> None:
+        """Test from_response with partial data."""
+        from unraid_api.models import ServerInfo
+
+        response = {
+            "info": {
+                "system": {"uuid": "abc123"},
+                "os": {"hostname": "MyServer"},
+                "versions": {"core": {"unraid": "7.1.4"}},
+            },
+        }
+
+        info = ServerInfo.from_response(response)
+
+        assert info.uuid == "abc123"
+        assert info.hostname == "MyServer"
+        assert info.model == "Unraid 7.1.4"
+        assert info.sw_version == "7.1.4"
+        assert info.lan_ip is None
+        assert info.license_type is None

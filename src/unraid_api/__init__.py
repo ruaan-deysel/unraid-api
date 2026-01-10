@@ -16,6 +16,7 @@ from unraid_api.models import (
     Notification,
     ParityCheck,
     PhysicalDisk,
+    ServerInfo,
     Share,
     SystemInfo,
     UnraidArray,
@@ -32,6 +33,7 @@ __all__ = [
     "Notification",
     "ParityCheck",
     "PhysicalDisk",
+    "ServerInfo",
     "Share",
     "SystemInfo",
     "UPSDevice",
@@ -44,4 +46,4 @@ __all__ = [
     "VmDomain",
 ]
 
-__version__ = "1.2.0"
+__version__ = "1.2.1"

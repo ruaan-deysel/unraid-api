@@ -1501,3 +1501,191 @@ class TestParityHistoryMethod:
                 assert len(result) == 2
                 assert result[0]["status"] == "COMPLETED"
                 assert result[0]["errors"] == 0
+
+
+class TestGetServerInfoMethod:
+    """Tests for get_server_info method."""
+
+    async def test_get_server_info(self) -> None:
+        """Test getting server info returns ServerInfo model."""
+        from unraid_api.models import ServerInfo
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "info": {
+                            "system": {
+                                "uuid": "abc123-def456",
+                                "manufacturer": "Dell Inc.",
+                                "model": "PowerEdge R730",
+                                "serial": "SYS123",
+                            },
+                            "baseboard": {
+                                "manufacturer": "Dell",
+                                "model": "0HFG24",
+                                "serial": "BB456",
+                            },
+                            "os": {
+                                "hostname": "Tower",
+                                "distro": "Unraid",
+                                "release": "7.2.0",
+                                "kernel": "6.1.38-Unraid",
+                                "arch": "x64",
+                            },
+                            "cpu": {
+                                "manufacturer": "Intel",
+                                "brand": "Intel Xeon E5-2680",
+                                "cores": 12,
+                                "threads": 24,
+                            },
+                            "versions": {
+                                "core": {
+                                    "unraid": "7.2.0",
+                                    "api": "4.29.2",
+                                }
+                            },
+                        },
+                        "server": {
+                            "lanip": "192.168.1.100",
+                            "localurl": "http://192.168.1.100",
+                            "remoteurl": "https://myserver.myunraid.net",
+                        },
+                        "registration": {
+                            "type": "Pro",
+                            "state": "valid",
+                        },
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_server_info()
+
+                # Check it returns a ServerInfo instance
+                assert isinstance(result, ServerInfo)
+
+                # Verify fields
+                assert result.uuid == "abc123-def456"
+                assert result.hostname == "Tower"
+                assert result.manufacturer == "Lime Technology"
+                assert result.model == "Unraid 7.2.0"
+                assert result.sw_version == "7.2.0"
+                assert result.hw_version == "6.1.38-Unraid"
+                assert result.serial_number == "SYS123"
+                assert result.hw_manufacturer == "Dell Inc."
+                assert result.hw_model == "PowerEdge R730"
+                assert result.api_version == "4.29.2"
+                assert result.lan_ip == "192.168.1.100"
+                assert result.local_url == "http://192.168.1.100"
+                assert result.remote_url == "https://myserver.myunraid.net"
+                assert result.license_type == "Pro"
+                assert result.license_state == "valid"
+                assert result.cpu_brand == "Intel Xeon E5-2680"
+                assert result.cpu_cores == 12
+                assert result.cpu_threads == 24
+
+    async def test_get_server_info_with_baseboard_fallback(self) -> None:
+        """Test server info falls back to baseboard when system info missing."""
+        from unraid_api.models import ServerInfo
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "info": {
+                            "system": {
+                                "uuid": "abc123",
+                                "manufacturer": None,
+                                "model": None,
+                                "serial": None,
+                            },
+                            "baseboard": {
+                                "manufacturer": "ASUS",
+                                "model": "Z690",
+                                "serial": "BBSERIAL123",
+                            },
+                            "os": {
+                                "hostname": "MyTower",
+                                "distro": "Unraid",
+                                "release": "7.1.4",
+                                "kernel": "6.1.38-Unraid",
+                                "arch": "x64",
+                            },
+                            "cpu": {
+                                "brand": "Intel Core i7-12700K",
+                                "cores": 12,
+                                "threads": 20,
+                            },
+                            "versions": {
+                                "core": {
+                                    "unraid": "7.1.4",
+                                    "api": "4.21.0",
+                                }
+                            },
+                        },
+                        "server": {
+                            "lanip": "192.168.1.50",
+                        },
+                        "registration": {
+                            "type": "Basic",
+                            "state": "valid",
+                        },
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_server_info()
+
+                assert isinstance(result, ServerInfo)
+                assert result.hw_manufacturer == "ASUS"
+                assert result.hw_model == "Z690"
+                assert result.serial_number == "BBSERIAL123"
+
+    async def test_get_server_info_minimal_response(self) -> None:
+        """Test server info with minimal data in response."""
+        from unraid_api.models import ServerInfo
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "info": {
+                            "system": {"uuid": "min-uuid"},
+                            "baseboard": {},
+                            "os": {"hostname": "MinimalServer"},
+                            "cpu": {},
+                            "versions": {
+                                "core": {
+                                    "unraid": "7.0.0",
+                                }
+                            },
+                        },
+                        "server": {},
+                        "registration": {},
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_server_info()
+
+                assert isinstance(result, ServerInfo)
+                assert result.uuid == "min-uuid"
+                assert result.hostname == "MinimalServer"
+                assert result.model == "Unraid 7.0.0"
+                assert result.lan_ip is None
+                assert result.license_type is None

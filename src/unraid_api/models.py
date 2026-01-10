@@ -487,6 +487,103 @@ class DiskPartition(UnraidBaseModel):
 
 
 # =============================================================================
+# Server Info Model (for Home Assistant integration)
+# =============================================================================
+
+
+class ServerInfo(UnraidBaseModel):
+    """Server information for device registration and identification.
+
+    This model consolidates system, hardware, OS, and network information
+    needed for Home Assistant device registration.
+    """
+
+    # Unique identification
+    uuid: str | None = None
+    hostname: str | None = None
+
+    # Device info (for HA DeviceInfo)
+    manufacturer: str = "Lime Technology"  # Always Lime Technology for Unraid
+    model: str | None = None  # "Unraid {version}"
+    sw_version: str | None = None  # Unraid version
+    hw_version: str | None = None  # Kernel version
+    serial_number: str | None = None
+
+    # Hardware info (from system or baseboard fallback)
+    hw_manufacturer: str | None = None
+    hw_model: str | None = None
+
+    # OS details
+    os_distro: str | None = None
+    os_release: str | None = None
+    os_arch: str | None = None
+
+    # API info
+    api_version: str | None = None
+
+    # Network/URLs
+    lan_ip: str | None = None
+    local_url: str | None = None
+    remote_url: str | None = None
+
+    # License
+    license_type: str | None = None
+    license_state: str | None = None
+
+    # CPU info
+    cpu_brand: str | None = None
+    cpu_cores: int | None = None
+    cpu_threads: int | None = None
+
+    @classmethod
+    def from_response(cls, data: dict[str, Any]) -> ServerInfo:
+        """Create ServerInfo from GraphQL response.
+
+        Args:
+            data: GraphQL response data containing info, server, and registration.
+
+        Returns:
+            ServerInfo instance with parsed data.
+
+        """
+        info = data.get("info", {})
+        system = info.get("system", {}) or {}
+        baseboard = info.get("baseboard", {}) or {}
+        os_info = info.get("os", {}) or {}
+        cpu = info.get("cpu", {}) or {}
+        versions = info.get("versions", {}) or {}
+        core_versions = versions.get("core", {}) or {}
+        server = data.get("server", {}) or {}
+        registration = data.get("registration", {}) or {}
+
+        unraid_version = core_versions.get("unraid") or "Unknown"
+
+        return cls(
+            uuid=system.get("uuid"),
+            hostname=os_info.get("hostname"),
+            manufacturer="Lime Technology",
+            model=f"Unraid {unraid_version}",
+            sw_version=unraid_version,
+            hw_version=os_info.get("kernel"),
+            serial_number=system.get("serial") or baseboard.get("serial"),
+            hw_manufacturer=system.get("manufacturer") or baseboard.get("manufacturer"),
+            hw_model=system.get("model") or baseboard.get("model"),
+            os_distro=os_info.get("distro"),
+            os_release=os_info.get("release"),
+            os_arch=os_info.get("arch"),
+            api_version=core_versions.get("api"),
+            lan_ip=server.get("lanip"),
+            local_url=server.get("localurl"),
+            remote_url=server.get("remoteurl"),
+            license_type=registration.get("type"),
+            license_state=registration.get("state"),
+            cpu_brand=cpu.get("brand"),
+            cpu_cores=cpu.get("cores"),
+            cpu_threads=cpu.get("threads"),
+        )
+
+
+# =============================================================================
 # Response Type Aliases
 # =============================================================================
 

@@ -19,6 +19,8 @@ if TYPE_CHECKING:
     import ssl
     from types import TracebackType
 
+    from unraid_api.models import ServerInfo
+
 _LOGGER = logging.getLogger(__name__)
 
 # HTTP status codes
@@ -422,6 +424,34 @@ class UnraidClient:
             "unraid": versions.get("unraid", "unknown"),
             "api": versions.get("api", "unknown"),
         }
+
+    async def get_server_info(self) -> ServerInfo:
+        """Get server information for device registration.
+
+        Returns comprehensive server identification data useful for
+        Home Assistant device registration and identification.
+
+        Returns:
+            ServerInfo model with all server identification data.
+
+        """
+        from unraid_api.models import ServerInfo
+
+        query_str = """
+            query {
+                info {
+                    system { uuid manufacturer model serial }
+                    baseboard { manufacturer model serial }
+                    os { hostname distro release kernel arch }
+                    cpu { manufacturer brand cores threads }
+                    versions { core { unraid api } }
+                }
+                server { lanip localurl remoteurl }
+                registration { type state }
+            }
+        """
+        result = await self.query(query_str)
+        return ServerInfo.from_response(result)
 
     # =========================================================================
     # Docker Container Methods
