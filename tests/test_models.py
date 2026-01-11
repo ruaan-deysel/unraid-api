@@ -583,6 +583,9 @@ class TestSystemMetrics:
 
         metrics = SystemMetrics(
             cpu_percent=25.5,
+            cpu_temperature=55.0,
+            cpu_temperatures=[55.0, 52.0],
+            cpu_power=65.5,
             memory_percent=50.0,
             memory_total=34359738368,
             memory_used=17179869184,
@@ -595,6 +598,9 @@ class TestSystemMetrics:
         )
 
         assert metrics.cpu_percent == 25.5
+        assert metrics.cpu_temperature == 55.0
+        assert metrics.cpu_temperatures == [55.0, 52.0]
+        assert metrics.cpu_power == 65.5
         assert metrics.memory_percent == 50.0
         assert metrics.memory_total == 34359738368
         assert metrics.memory_used == 17179869184
@@ -609,6 +615,9 @@ class TestSystemMetrics:
         metrics = SystemMetrics()
 
         assert metrics.cpu_percent is None
+        assert metrics.cpu_temperature is None
+        assert metrics.cpu_temperatures == []
+        assert metrics.cpu_power is None
         assert metrics.memory_percent is None
         assert metrics.memory_total is None
         assert metrics.uptime is None
@@ -631,12 +640,18 @@ class TestSystemMetrics:
                     "percentSwapTotal": 10.0,
                 },
             },
-            "info": {"os": {"uptime": "2024-01-15T10:30:00Z"}},
+            "info": {
+                "os": {"uptime": "2024-01-15T10:30:00Z"},
+                "cpu": {"packages": {"temp": [55.0, 52.0], "totalPower": 65.5}},
+            },
         }
 
         metrics = SystemMetrics.from_response(response)
 
         assert metrics.cpu_percent == 25.5
+        assert metrics.cpu_temperature == 55.0
+        assert metrics.cpu_temperatures == [55.0, 52.0]
+        assert metrics.cpu_power == 65.5
         assert metrics.memory_percent == 50.0
         assert metrics.memory_total == 34359738368
         assert metrics.memory_used == 17179869184
@@ -660,6 +675,9 @@ class TestSystemMetrics:
         metrics = SystemMetrics.from_response(response)
 
         assert metrics.cpu_percent == 10.0
+        assert metrics.cpu_temperature is None
+        assert metrics.cpu_temperatures == []
+        assert metrics.cpu_power is None
         assert metrics.memory_percent == 30.0
         assert metrics.memory_total is None
         assert metrics.uptime is None
@@ -673,8 +691,40 @@ class TestSystemMetrics:
         metrics = SystemMetrics.from_response(response)
 
         assert metrics.cpu_percent is None
+        assert metrics.cpu_temperature is None
+        assert metrics.cpu_temperatures == []
+        assert metrics.cpu_power is None
         assert metrics.memory_percent is None
         assert metrics.uptime is None
+
+    def test_system_metrics_from_response_single_temp(self) -> None:
+        """Test from_response with single CPU temperature."""
+        from unraid_api.models import SystemMetrics
+
+        response = {
+            "metrics": {"cpu": {"percentTotal": 15.0}},
+            "info": {"cpu": {"packages": {"temp": [45.0], "totalPower": 30.0}}},
+        }
+
+        metrics = SystemMetrics.from_response(response)
+
+        assert metrics.cpu_temperature == 45.0
+        assert metrics.cpu_temperatures == [45.0]
+        assert metrics.cpu_power == 30.0
+
+    def test_system_metrics_from_response_empty_temp_list(self) -> None:
+        """Test from_response with empty temperature list."""
+        from unraid_api.models import SystemMetrics
+
+        response = {
+            "info": {"cpu": {"packages": {"temp": [], "totalPower": None}}},
+        }
+
+        metrics = SystemMetrics.from_response(response)
+
+        assert metrics.cpu_temperature is None
+        assert metrics.cpu_temperatures == []
+        assert metrics.cpu_power is None
 
 
 class TestRegistrationModel:

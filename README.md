@@ -178,7 +178,7 @@ async with UnraidClient(host, api_key) as client:
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `get_system_metrics()` | `SystemMetrics` | CPU, memory, uptime, notifications |
+| `get_system_metrics()` | `SystemMetrics` | CPU, memory, temperature, power, uptime |
 | `typed_get_array()` | `UnraidArray` | Array state, capacity, disks |
 | `typed_get_containers()` | `list[DockerContainer]` | All Docker containers |
 | `typed_get_vms()` | `list[VmDomain]` | All virtual machines |
@@ -241,7 +241,7 @@ async with UnraidClient(host, api_key) as client:
 #### System Models
 - `ServerInfo` - Server info for HA device registration
 - `SystemInfo` - System information
-- `SystemMetrics` - CPU, memory, uptime metrics
+- `SystemMetrics` - CPU, memory, temperature, power, uptime metrics
 - `Vars` - System configuration variables
 - `Registration` - License/registration info
 - `Flash` - Flash drive information

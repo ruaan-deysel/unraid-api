@@ -576,6 +576,9 @@ class SystemMetrics(UnraidBaseModel):
 
     # CPU metrics
     cpu_percent: float | None = None
+    cpu_temperature: float | None = None  # First package temp (most common use)
+    cpu_temperatures: list[float] = []  # All package temps (for multi-CPU)
+    cpu_power: float | None = None  # Total power consumption in watts
 
     # Memory metrics
     memory_percent: float | None = None
@@ -615,8 +618,16 @@ class SystemMetrics(UnraidBaseModel):
         info = data.get("info", {}) or {}
         os_info = info.get("os", {}) or {}
 
+        # CPU temperature and power from info.cpu.packages
+        cpu_info = info.get("cpu", {}) or {}
+        packages = cpu_info.get("packages", {}) or {}
+        temps = packages.get("temp", []) or []
+
         return cls(
             cpu_percent=cpu.get("percentTotal"),
+            cpu_temperature=temps[0] if temps else None,
+            cpu_temperatures=temps,
+            cpu_power=packages.get("totalPower"),
             memory_percent=memory.get("percentTotal"),
             memory_total=memory.get("total"),
             memory_used=memory.get("used"),

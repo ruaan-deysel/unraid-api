@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-01-11
+
+### Added
+- CPU temperature fields to `SystemMetrics` model:
+  - `cpu_temperature` - First package temperature (most common use)
+  - `cpu_temperatures` - All package temperatures (for multi-CPU systems)
+  - `cpu_power` - Total CPU power consumption in watts
+- Updated `get_system_metrics()` GraphQL query to fetch `info.cpu.packages`
+
+### Fixed
+- Issue #3: Add CPU temperature and power to SystemMetrics
+
 ## [1.3.0] - 2026-01-11
 
 ### Added
@@ -112,6 +124,7 @@ Return dict/list for flexible access:
 - `PhysicalDisk`
 - `Notification`, `NotificationOverview`
 
-[Unreleased]: https://github.com/ruaan-deysel/unraid-api/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/ruaan-deysel/unraid-api/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/ruaan-deysel/unraid-api/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/ruaan-deysel/unraid-api/compare/v1.2.2...v1.3.0
 [1.2.2]: https://github.com/ruaan-deysel/unraid-api/releases/tag/v1.2.2

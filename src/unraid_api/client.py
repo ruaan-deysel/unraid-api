@@ -495,7 +495,10 @@ class UnraidClient:
                         swapTotal swapUsed percentSwapTotal
                     }
                 }
-                info { os { uptime } }
+                info {
+                    os { uptime }
+                    cpu { packages { temp totalPower } }
+                }
             }
         """
         result = await self.query(query_str)
