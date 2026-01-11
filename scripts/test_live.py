@@ -75,7 +75,18 @@ async def main() -> None:
             tests.append(("get_vars", f"FAIL: {e}"))
             print(f"✗ get_vars: {e}")
 
-        # 6. Owner
+        # 6. System Metrics (CPU temp & power)
+        try:
+            result = await client.get_system_metrics()
+            tests.append(("get_system_metrics", "PASS"))
+            print(f"✓ get_system_metrics: cpu={result.cpu_percent}%, temp={result.cpu_temperature}°C, power={result.cpu_power}W")
+            print(f"  → cpu_temperatures: {result.cpu_temperatures}")
+            print(f"  → memory: {result.memory_percent}%")
+        except Exception as e:
+            tests.append(("get_system_metrics", f"FAIL: {e}"))
+            print(f"✗ get_system_metrics: {e}")
+
+        # 7. Owner
         try:
             result = await client.get_owner()
             tests.append(("get_owner", "PASS"))

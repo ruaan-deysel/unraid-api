@@ -318,6 +318,6 @@ Contributions welcome! Please ensure:
 
 ## Links
 
+- [Official Unraid API Repository](https://github.com/unraid/api)
 - [GraphQL API Reference](UNRAIDAPI.md)
-- [Home Assistant Integration](https://github.com/ruaan-deysel/ha-unraid)
 - [PyPI Package](https://pypi.org/project/unraid-api/)
