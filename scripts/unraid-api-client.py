@@ -2036,7 +2036,7 @@ def main():
             if args.apikey_roles:
                 roles = [role.strip() for role in args.apikey_roles.split(",")]
 
-            print(f"\n=== CREATING API KEY: {args.apikey_name} ===")
+            print("\n=== CREATING API KEY ===")
             response = client.create_api_key(args.apikey_name, args.description or "", roles)
             client.pretty_print_response(response)
             return
