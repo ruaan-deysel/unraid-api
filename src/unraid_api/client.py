@@ -19,7 +19,28 @@ if TYPE_CHECKING:
     import ssl
     from types import TracebackType
 
-    from unraid_api.models import ServerInfo
+    from unraid_api.models import (
+        Cloud,
+        Connect,
+        DockerContainer,
+        DockerNetwork,
+        Flash,
+        LogFile,
+        NotificationOverview,
+        Owner,
+        Plugin,
+        Registration,
+        RemoteAccess,
+        ServerInfo,
+        Service,
+        Share,
+        SystemMetrics,
+        UnraidArray,
+        UPSDevice,
+        Vars,
+        VmDomain,
+    )
+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -452,6 +473,225 @@ class UnraidClient:
         """
         result = await self.query(query_str)
         return ServerInfo.from_response(result)
+
+    async def get_system_metrics(self) -> SystemMetrics:
+        """Get system metrics for monitoring.
+
+        Returns CPU, memory, swap, and uptime metrics for Home Assistant
+        sensor entities. This is called every 30 seconds by the HA integration.
+
+        Returns:
+            SystemMetrics model with all metrics data.
+
+        """
+        from unraid_api.models import SystemMetrics
+
+        query_str = """
+            query {
+                metrics {
+                    cpu { percentTotal }
+                    memory {
+                        total used free available percentTotal
+                        swapTotal swapUsed percentSwapTotal
+                    }
+                }
+                info { os { uptime } }
+            }
+        """
+        result = await self.query(query_str)
+        return SystemMetrics.from_response(result)
+
+    async def typed_get_containers(self) -> list[DockerContainer]:
+        """Get all Docker containers as Pydantic models.
+
+        Returns:
+            List of DockerContainer models.
+
+        """
+        from unraid_api.models import DockerContainer
+
+        query_str = """
+            query {
+                docker {
+                    containers {
+                        id
+                        names
+                        image
+                        state
+                        status
+                        autoStart
+                        ports { ip privatePort publicPort type }
+                    }
+                }
+            }
+        """
+        result = await self.query(query_str)
+        containers = result.get("docker", {}).get("containers", []) or []
+        return [DockerContainer.from_api_response(c) for c in containers]
+
+    async def typed_get_vms(self) -> list[VmDomain]:
+        """Get all virtual machines as Pydantic models.
+
+        Returns:
+            List of VmDomain models.
+
+        """
+        from unraid_api.models import VmDomain
+
+        query_str = """
+            query {
+                vms {
+                    domains {
+                        id
+                        name
+                        state
+                    }
+                }
+            }
+        """
+        result = await self.query(query_str)
+        domains = result.get("vms", {}).get("domains", []) or []
+        return [VmDomain(**vm) for vm in domains]
+
+    async def typed_get_ups_devices(self) -> list[UPSDevice]:
+        """Get UPS devices as Pydantic models.
+
+        Returns:
+            List of UPSDevice models.
+
+        """
+        from unraid_api.models import UPSDevice
+
+        query_str = """
+            query {
+                upsDevices {
+                    id
+                    name
+                    model
+                    status
+                    battery { chargeLevel estimatedRuntime health }
+                    power { inputVoltage outputVoltage loadPercentage }
+                }
+            }
+        """
+        result = await self.query(query_str)
+        devices = result.get("upsDevices", []) or []
+        return [UPSDevice(**d) for d in devices]
+
+    async def typed_get_array(self) -> UnraidArray:
+        """Get array status as Pydantic model.
+
+        This is a high-priority method for Home Assistant integration,
+        called every 30 seconds. Does NOT wake sleeping disks.
+
+        Returns:
+            UnraidArray model with array state, capacity, and disk info.
+
+        """
+        from unraid_api.models import ArrayDisk, UnraidArray
+
+        query_str = """
+            query {
+                array {
+                    state
+                    capacity {
+                        kilobytes { free used total }
+                    }
+                    parityCheckStatus {
+                        status
+                        progress
+                        running
+                        paused
+                        errors
+                        speed
+                    }
+                    boot {
+                        id name device size temp type
+                        fsSize fsUsed fsFree fsType
+                    }
+                    parities {
+                        id idx name device size status type temp
+                        isSpinning
+                    }
+                    disks {
+                        id idx name device size status type temp
+                        fsSize fsFree fsUsed fsType
+                        isSpinning
+                    }
+                    caches {
+                        id idx name device size status type temp
+                        fsSize fsFree fsUsed fsType
+                        isSpinning
+                    }
+                }
+            }
+        """
+        result = await self.query(query_str)
+        array_data = result.get("array", {}) or {}
+
+        # Parse nested models
+        boot_data = array_data.get("boot")
+        boot = ArrayDisk(**boot_data) if boot_data else None
+
+        return UnraidArray(
+            state=array_data.get("state"),
+            capacity=array_data.get("capacity", {}),
+            parityCheckStatus=array_data.get("parityCheckStatus", {}),
+            boot=boot,
+            parities=[ArrayDisk(**d) for d in (array_data.get("parities") or [])],
+            disks=[ArrayDisk(**d) for d in (array_data.get("disks") or [])],
+            caches=[ArrayDisk(**d) for d in (array_data.get("caches") or [])],
+        )
+
+    async def typed_get_shares(self) -> list[Share]:
+        """Get all shares as Pydantic models.
+
+        Returns:
+            List of Share models.
+
+        """
+        from unraid_api.models import Share
+
+        query_str = """
+            query {
+                shares {
+                    id
+                    name
+                    free
+                    used
+                    size
+                }
+            }
+        """
+        result = await self.query(query_str)
+        shares = result.get("shares", []) or []
+        return [Share(**s) for s in shares]
+
+    async def get_notification_overview(self) -> NotificationOverview:
+        """Get notification overview as Pydantic model.
+
+        Returns notification counts by type (info, warning, alert)
+        for both unread and archived notifications.
+
+        Returns:
+            NotificationOverview model with notification counts.
+
+        """
+        from unraid_api.models import NotificationOverview
+
+        query_str = """
+            query {
+                notifications {
+                    overview {
+                        unread { info warning alert total }
+                        archive { info warning alert total }
+                    }
+                }
+            }
+        """
+        result = await self.query(query_str)
+        overview_data = result.get("notifications", {}).get("overview", {}) or {}
+        return NotificationOverview(**overview_data)
 
     # =========================================================================
     # Docker Container Methods
@@ -1343,3 +1583,697 @@ class UnraidClient:
         """
         result = await self.query(query_str)
         return list(result.get("parityHistory", []))
+
+    # =========================================================================
+    # Registration Methods
+    # =========================================================================
+
+    async def get_registration(self) -> dict[str, Any]:
+        """Get license registration information.
+
+        Returns:
+            Registration data including license type and state.
+
+        """
+
+        query_str = """
+            query {
+                registration {
+                    id
+                    type
+                    state
+                    expiration
+                    updateExpiration
+                }
+            }
+        """
+        result = await self.query(query_str)
+        return dict(result.get("registration", {}))
+
+    async def typed_get_registration(self) -> Registration:
+        """Get license registration as Pydantic model.
+
+        Returns:
+            Registration model with license information.
+
+        """
+        from unraid_api.models import Registration
+
+        data = await self.get_registration()
+        return Registration(**data)
+
+    # =========================================================================
+    # System Variables Methods
+    # =========================================================================
+
+    async def get_vars(self) -> dict[str, Any]:
+        """Get system variables.
+
+        Returns the unified system configuration from /var/local/emhttp/var.ini.
+        Contains hostname, timezone, array state, share counts, and more.
+
+        Returns:
+            System vars dictionary with all configuration values.
+
+        """
+        query_str = """
+            query {
+                vars {
+                    id
+                    version
+                    name
+                    timeZone
+                    comment
+                    security
+                    workgroup
+                    domain
+                    domainShort
+                    maxArraysz
+                    maxCachesz
+                    sysModel
+                    sysArraySlots
+                    sysCacheSlots
+                    sysFlashSlots
+                    deviceCount
+                    useSsl
+                    port
+                    portssl
+                    localTld
+                    bindMgt
+                    useTelnet
+                    porttelnet
+                    useSsh
+                    portssh
+                    useNtp
+                    ntpServer1
+                    ntpServer2
+                    ntpServer3
+                    ntpServer4
+                    hideDotFiles
+                    localMaster
+                    enableFruit
+                    shareSmbEnabled
+                    shareNfsEnabled
+                    shareAfpEnabled
+                    startArray
+                    spindownDelay
+                    safeMode
+                    startMode
+                    configValid
+                    configError
+                    flashGuid
+                    flashProduct
+                    flashVendor
+                    regCheck
+                    regFile
+                    regGuid
+                    regTy
+                    regState
+                    regTo
+                    mdColor
+                    mdNumDisks
+                    mdNumDisabled
+                    mdNumInvalid
+                    mdNumMissing
+                    mdResync
+                    mdResyncAction
+                    mdResyncPos
+                    mdState
+                    mdVersion
+                    cacheNumDevices
+                    fsState
+                    fsProgress
+                    fsCopyPrcnt
+                    fsNumMounted
+                    fsNumUnmountable
+                    shareCount
+                    shareSmbCount
+                    shareNfsCount
+                    shareAfpCount
+                    shareMoverActive
+                    csrfToken
+                }
+            }
+        """
+        result = await self.query(query_str)
+        return dict(result.get("vars", {}))
+
+    async def typed_get_vars(self) -> Vars:
+        """Get system variables as a Pydantic model.
+
+        Returns:
+            Vars model with all system configuration.
+
+        """
+        from unraid_api.models import Vars
+
+        data = await self.get_vars()
+        return Vars(**data)
+
+    # =========================================================================
+    # Service Methods
+    # =========================================================================
+
+    async def get_services(self) -> list[dict[str, Any]]:
+        """Get system services status.
+
+        Returns:
+            List of service data dictionaries.
+
+        """
+        query_str = """
+            query {
+                services {
+                    id
+                    name
+                    online
+                    uptime { timestamp }
+                    version
+                }
+            }
+        """
+        result = await self.query(query_str)
+        return list(result.get("services", []))
+
+    async def typed_get_services(self) -> list[Service]:
+        """Get system services as Pydantic models.
+
+        Returns:
+            List of Service models.
+
+        """
+        from unraid_api.models import Service
+
+        services = await self.get_services()
+        return [Service(**s) for s in services]
+
+    # =========================================================================
+    # Flash Drive Methods
+    # =========================================================================
+
+    async def get_flash(self) -> dict[str, Any]:
+        """Get flash drive information.
+
+        Returns:
+            Flash drive data dictionary.
+
+        """
+        query_str = """
+            query {
+                flash {
+                    id
+                    vendor
+                    product
+                }
+            }
+        """
+        result = await self.query(query_str)
+        return dict(result.get("flash", {}))
+
+    async def typed_get_flash(self) -> Flash:
+        """Get flash drive as Pydantic model.
+
+        Returns:
+            Flash model with drive information.
+
+        """
+        from unraid_api.models import Flash
+
+        data = await self.get_flash()
+        return Flash(**data)
+
+    # =========================================================================
+    # Owner Methods
+    # =========================================================================
+
+    async def get_owner(self) -> dict[str, Any]:
+        """Get owner/user information.
+
+        Note: avatar and url fields are only available when signed into Unraid Connect.
+        The API may return errors for these non-nullable fields if not signed in.
+
+        Returns:
+            Owner data dictionary.
+
+        """
+        query_str = """
+            query {
+                owner {
+                    username
+                }
+            }
+        """
+        result = await self.query(query_str)
+        return dict(result.get("owner", {}))
+
+    async def typed_get_owner(self) -> Owner:
+        """Get owner as Pydantic model.
+
+        Returns:
+            Owner model with user information.
+
+        """
+        from unraid_api.models import Owner
+
+        data = await self.get_owner()
+        return Owner(**data)
+
+    # =========================================================================
+    # Plugin Methods
+    # =========================================================================
+
+    async def get_plugins(self) -> list[dict[str, Any]]:
+        """Get installed plugins.
+
+        Returns:
+            List of plugin data dictionaries.
+
+        """
+        query_str = """
+            query {
+                plugins {
+                    name
+                    version
+                    hasApiModule
+                    hasCliModule
+                }
+            }
+        """
+        result = await self.query(query_str)
+        return list(result.get("plugins", []))
+
+    async def typed_get_plugins(self) -> list[Plugin]:
+        """Get installed plugins as Pydantic models.
+
+        Returns:
+            List of Plugin models.
+
+        """
+        from unraid_api.models import Plugin
+
+        plugins = await self.get_plugins()
+        return [Plugin(**p) for p in plugins]
+
+    # =========================================================================
+    # Docker Network Methods
+    # =========================================================================
+
+    async def get_docker_networks(self) -> list[dict[str, Any]]:
+        """Get Docker networks.
+
+        Returns:
+            List of Docker network data dictionaries.
+
+        """
+        query_str = """
+            query {
+                docker {
+                    networks {
+                        id
+                        name
+                        created
+                        scope
+                        driver
+                        enableIPv6
+                        internal
+                        attachable
+                        ingress
+                        configOnly
+                    }
+                }
+            }
+        """
+        result = await self.query(query_str)
+        return list(result.get("docker", {}).get("networks", []))
+
+    async def typed_get_docker_networks(self) -> list[DockerNetwork]:
+        """Get Docker networks as Pydantic models.
+
+        Returns:
+            List of DockerNetwork models.
+
+        """
+        from unraid_api.models import DockerNetwork
+
+        networks = await self.get_docker_networks()
+        return [DockerNetwork(**n) for n in networks]
+
+    # =========================================================================
+    # Log File Methods
+    # =========================================================================
+
+    async def get_log_files(self) -> list[dict[str, Any]]:
+        """Get available log files.
+
+        Returns:
+            List of log file data dictionaries.
+
+        """
+        query_str = """
+            query {
+                logFiles {
+                    name
+                    path
+                    size
+                    modifiedAt
+                }
+            }
+        """
+        result = await self.query(query_str)
+        return list(result.get("logFiles", []))
+
+    async def typed_get_log_files(self) -> list[LogFile]:
+        """Get available log files as Pydantic models.
+
+        Returns:
+            List of LogFile models.
+
+        """
+        from unraid_api.models import LogFile
+
+        log_files = await self.get_log_files()
+        return [LogFile(**lf) for lf in log_files]
+
+    async def get_log_file(self, path: str, lines: int | None = None) -> dict[str, Any]:
+        """Get contents of a specific log file.
+
+        Args:
+            path: Path to the log file.
+            lines: Number of lines to return (optional).
+
+        Returns:
+            Log file content data.
+
+        """
+        query_str = """
+            query GetLogFile($path: String!, $lines: Int) {
+                logFile(path: $path, lines: $lines) {
+                    path
+                    content
+                    totalLines
+                    startLine
+                }
+            }
+        """
+        variables: dict[str, Any] = {"path": path}
+        if lines is not None:
+            variables["lines"] = lines
+        result = await self.query(query_str, variables)
+        return dict(result.get("logFile", {}))
+
+    # =========================================================================
+    # Cloud/Connect Methods
+    # =========================================================================
+
+    async def get_cloud(self) -> dict[str, Any]:
+        """Get cloud settings information.
+
+        Returns:
+            Cloud settings data dictionary.
+
+        """
+        query_str = """
+            query {
+                cloud {
+                    error
+                    apiKey { valid error }
+                    relay { status timeout error }
+                    minigraphql { status timeout error }
+                    cloud { status ip error }
+                    allowedOrigins
+                }
+            }
+        """
+        result = await self.query(query_str)
+        return dict(result.get("cloud", {}))
+
+    async def typed_get_cloud(self) -> Cloud:
+        """Get cloud settings as Pydantic model.
+
+        Returns:
+            Cloud model with settings information.
+
+        """
+        from unraid_api.models import Cloud
+
+        data = await self.get_cloud()
+        return Cloud(**data)
+
+    async def get_connect(self) -> dict[str, Any]:
+        """Get Unraid Connect information.
+
+        Returns:
+            Connect data dictionary.
+
+        """
+        query_str = """
+            query {
+                connect {
+                    id
+                    dynamicRemoteAccess {
+                        enabledType
+                        runningType
+                        error
+                    }
+                }
+            }
+        """
+        result = await self.query(query_str)
+        return dict(result.get("connect", {}))
+
+    async def typed_get_connect(self) -> Connect:
+        """Get Unraid Connect as Pydantic model.
+
+        Returns:
+            Connect model with connection information.
+
+        """
+        from unraid_api.models import Connect
+
+        data = await self.get_connect()
+        return Connect(**data)
+
+    async def get_remote_access(self) -> dict[str, Any]:
+        """Get remote access configuration.
+
+        Returns:
+            Remote access data dictionary.
+
+        """
+        query_str = """
+            query {
+                remoteAccess {
+                    accessType
+                    forwardType
+                    port
+                }
+            }
+        """
+        result = await self.query(query_str)
+        return dict(result.get("remoteAccess", {}))
+
+    async def typed_get_remote_access(self) -> RemoteAccess:
+        """Get remote access as Pydantic model.
+
+        Returns:
+            RemoteAccess model with configuration.
+
+        """
+        from unraid_api.models import RemoteAccess
+
+        data = await self.get_remote_access()
+        return RemoteAccess(**data)
+
+    # =========================================================================
+    # Notification Mutation Methods
+    # =========================================================================
+
+    async def archive_notification(self, notification_id: str) -> dict[str, Any]:
+        """Archive a notification.
+
+        Args:
+            notification_id: ID of the notification to archive.
+
+        Returns:
+            Mutation response data.
+
+        """
+        mutation = """
+            mutation ArchiveNotification($id: PrefixedID!) {
+                notifications {
+                    archive(id: $id) {
+                        id
+                        title
+                    }
+                }
+            }
+        """
+        return await self.mutate(mutation, {"id": notification_id})
+
+    async def unarchive_notification(self, notification_id: str) -> dict[str, Any]:
+        """Mark an archived notification as unread.
+
+        Args:
+            notification_id: ID of the notification to unarchive.
+
+        Returns:
+            Mutation response data.
+
+        """
+        mutation = """
+            mutation UnarchiveNotification($id: PrefixedID!) {
+                notifications {
+                    unread(id: $id) {
+                        id
+                        title
+                    }
+                }
+            }
+        """
+        return await self.mutate(mutation, {"id": notification_id})
+
+    async def delete_notification(self, notification_id: str) -> dict[str, Any]:
+        """Delete a notification.
+
+        Args:
+            notification_id: ID of the notification to delete.
+
+        Returns:
+            Mutation response data.
+
+        """
+        mutation = """
+            mutation DeleteNotification($id: PrefixedID!) {
+                notifications {
+                    delete(id: $id)
+                }
+            }
+        """
+        return await self.mutate(mutation, {"id": notification_id})
+
+    async def archive_all_notifications(self) -> dict[str, Any]:
+        """Archive all unread notifications.
+
+        Returns:
+            Mutation response data.
+
+        """
+        mutation = """
+            mutation ArchiveAllNotifications {
+                notifications {
+                    archiveAll
+                }
+            }
+        """
+        return await self.mutate(mutation)
+
+    async def delete_all_notifications(self) -> dict[str, Any]:
+        """Delete all archived notifications.
+
+        Returns:
+            Mutation response data.
+
+        """
+        mutation = """
+            mutation DeleteAllNotifications {
+                notifications {
+                    deleteAll
+                }
+            }
+        """
+        return await self.mutate(mutation)
+
+    # =========================================================================
+    # VM Reset Method
+    # =========================================================================
+
+    async def reset_vm(self, vm_id: str) -> dict[str, Any]:
+        """Reset a virtual machine (hard reset).
+
+        Args:
+            vm_id: VM ID to reset.
+
+        Returns:
+            Mutation response data.
+
+        """
+        mutation = """
+            mutation ResetVM($id: PrefixedID!) {
+                vm {
+                    reset(id: $id)
+                }
+            }
+        """
+        return await self.mutate(mutation, {"id": vm_id})
+
+    # =========================================================================
+    # Array Disk Management Methods
+    # =========================================================================
+
+    async def add_array_disk(self, disk_id: str) -> dict[str, Any]:
+        """Add a disk to the array.
+
+        Args:
+            disk_id: Disk ID to add.
+
+        Returns:
+            Mutation response data.
+
+        """
+        mutation = """
+            mutation AddArrayDisk($id: PrefixedID!) {
+                array {
+                    addDisk(id: $id) {
+                        id
+                        name
+                        status
+                    }
+                }
+            }
+        """
+        return await self.mutate(mutation, {"id": disk_id})
+
+    async def remove_array_disk(self, disk_id: str) -> dict[str, Any]:
+        """Remove a disk from the array.
+
+        Args:
+            disk_id: Disk ID to remove.
+
+        Returns:
+            Mutation response data.
+
+        """
+        mutation = """
+            mutation RemoveArrayDisk($id: PrefixedID!) {
+                array {
+                    removeDisk(id: $id) {
+                        id
+                        name
+                        status
+                    }
+                }
+            }
+        """
+        return await self.mutate(mutation, {"id": disk_id})
+
+    async def clear_disk_stats(self, disk_id: str) -> dict[str, Any]:
+        """Clear statistics for an array disk.
+
+        Args:
+            disk_id: Disk ID to clear statistics for.
+
+        Returns:
+            Mutation response data.
+
+        """
+        mutation = """
+            mutation ClearDiskStats($id: PrefixedID!) {
+                array {
+                    clearStatistics(id: $id) {
+                        id
+                        name
+                    }
+                }
+            }
+        """
+        return await self.mutate(mutation, {"id": disk_id})

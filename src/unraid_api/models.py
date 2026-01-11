@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 def _parse_datetime(value: str | datetime | None) -> datetime | None:
@@ -310,6 +310,12 @@ class ContainerPort(UnraidBaseModel):
     type: str | None = None
 
 
+class ContainerHostConfig(UnraidBaseModel):
+    """Docker container host configuration."""
+
+    networkMode: str | None = None
+
+
 class DockerContainerStats(UnraidBaseModel):
     """Docker container resource statistics."""
 
@@ -331,13 +337,81 @@ class DockerContainer(UnraidBaseModel):
     state: str | None = None
     status: str | None = None  # Status message (e.g., "Up 5 days")
     image: str | None = None
+    imageId: str | None = None
+    command: str | None = None
+    created: int | None = None  # Unix timestamp
+    sizeRootFs: int | None = None  # Total size of files in bytes
+    labels: dict[str, Any] | None = None
+    networkSettings: dict[str, Any] | None = None
+    mounts: list[dict[str, Any]] | None = None
     webUiUrl: str | None = None
     iconUrl: str | None = None
     autoStart: bool | None = None
     isUpdateAvailable: bool | None = None
     isOrphaned: bool | None = None
+    hostConfig: ContainerHostConfig | None = None
     ports: list[ContainerPort] = []
     stats: DockerContainerStats | None = None
+
+    @classmethod
+    def from_api_response(cls, data: dict[str, Any]) -> DockerContainer:
+        """Create DockerContainer from API response.
+
+        Extracts name from the names array, removing leading slashes.
+
+        Args:
+            data: API response data for a container.
+
+        Returns:
+            DockerContainer instance with parsed data.
+
+        """
+        names = data.get("names", []) or []
+        # Extract name from names array, removing leading slash
+        name = names[0].lstrip("/") if names else data.get("id", "unknown")
+
+        host_config = data.get("hostConfig")
+
+        return cls(
+            id=data.get("id", ""),
+            name=name,
+            names=names,
+            state=data.get("state"),
+            status=data.get("status"),
+            image=data.get("image"),
+            imageId=data.get("imageId"),
+            command=data.get("command"),
+            created=data.get("created"),
+            sizeRootFs=data.get("sizeRootFs"),
+            labels=data.get("labels"),
+            networkSettings=data.get("networkSettings"),
+            mounts=data.get("mounts"),
+            webUiUrl=data.get("webUiUrl"),
+            iconUrl=data.get("iconUrl"),
+            autoStart=data.get("autoStart"),
+            isUpdateAvailable=data.get("isUpdateAvailable"),
+            isOrphaned=data.get("isOrphaned"),
+            hostConfig=(ContainerHostConfig(**host_config) if host_config else None),
+            ports=[ContainerPort(**p) for p in (data.get("ports") or [])],
+            stats=(
+                DockerContainerStats(**data["stats"]) if data.get("stats") else None
+            ),
+        )
+
+
+class DockerNetwork(UnraidBaseModel):
+    """Docker network information."""
+
+    id: str
+    name: str
+    created: str | None = None
+    scope: str | None = None
+    driver: str | None = None
+    enableIPv6: bool | None = None
+    internal: bool | None = None
+    attachable: bool | None = None
+    ingress: bool | None = None
+    configOnly: bool | None = None
 
 
 # =============================================================================
@@ -369,6 +443,7 @@ class UPSBattery(UnraidBaseModel):
 
     chargeLevel: int | None = None
     estimatedRuntime: int | None = None
+    health: str | None = None  # Battery health status
 
 
 class UPSPower(UnraidBaseModel):
@@ -384,6 +459,7 @@ class UPSDevice(UnraidBaseModel):
 
     id: str
     name: str
+    model: str | None = None
     status: str | None = None
     battery: UPSBattery = UPSBattery()
     power: UPSPower = UPSPower()
@@ -487,6 +563,73 @@ class DiskPartition(UnraidBaseModel):
 
 
 # =============================================================================
+# System Metrics Model (for Home Assistant integration)
+# =============================================================================
+
+
+class SystemMetrics(UnraidBaseModel):
+    """System metrics for CPU, memory, and uptime monitoring.
+
+    This model consolidates metrics data for Home Assistant sensor entities.
+    Use get_system_metrics() to fetch this data efficiently.
+    """
+
+    # CPU metrics
+    cpu_percent: float | None = None
+
+    # Memory metrics
+    memory_percent: float | None = None
+    memory_total: int | None = None  # Total memory in bytes
+    memory_used: int | None = None  # Used memory in bytes
+    memory_free: int | None = None  # Free memory in bytes
+    memory_available: int | None = None  # Available memory in bytes
+
+    # Swap metrics
+    swap_percent: float | None = None
+    swap_total: int | None = None  # Total swap in bytes
+    swap_used: int | None = None  # Used swap in bytes
+
+    # Uptime
+    uptime: datetime | None = None  # System boot time
+
+    @field_validator("uptime", mode="before")
+    @classmethod
+    def parse_uptime(cls, value: str | datetime | None) -> datetime | None:
+        """Parse uptime from ISO format string."""
+        return _parse_datetime(value)
+
+    @classmethod
+    def from_response(cls, data: dict[str, Any]) -> SystemMetrics:
+        """Create SystemMetrics from GraphQL response.
+
+        Args:
+            data: GraphQL response data containing metrics and info.
+
+        Returns:
+            SystemMetrics instance with parsed data.
+
+        """
+        metrics = data.get("metrics", {}) or {}
+        cpu = metrics.get("cpu", {}) or {}
+        memory = metrics.get("memory", {}) or {}
+        info = data.get("info", {}) or {}
+        os_info = info.get("os", {}) or {}
+
+        return cls(
+            cpu_percent=cpu.get("percentTotal"),
+            memory_percent=memory.get("percentTotal"),
+            memory_total=memory.get("total"),
+            memory_used=memory.get("used"),
+            memory_free=memory.get("free"),
+            memory_available=memory.get("available"),
+            swap_percent=memory.get("percentSwapTotal"),
+            swap_total=memory.get("swapTotal"),
+            swap_used=memory.get("swapUsed"),
+            uptime=os_info.get("uptime"),
+        )
+
+
+# =============================================================================
 # Server Info Model (for Home Assistant integration)
 # =============================================================================
 
@@ -581,6 +724,355 @@ class ServerInfo(UnraidBaseModel):
             cpu_cores=cpu.get("cores"),
             cpu_threads=cpu.get("threads"),
         )
+
+
+# =============================================================================
+# Registration Models
+# =============================================================================
+
+
+class Registration(UnraidBaseModel):
+    """Unraid license registration information."""
+
+    id: str | None = None
+    type: str | None = None  # License type (Basic, Plus, Pro, etc.)
+    state: str | None = None  # License state
+    expiration: str | None = None
+    updateExpiration: str | None = None
+
+
+# =============================================================================
+# System Variables (Vars) Models
+# =============================================================================
+
+
+class Vars(UnraidBaseModel):
+    """Unraid system variables (vars object).
+
+    This represents the system configuration variables from /var/local/emhttp/var.ini.
+    Contains many system settings including hostname, timezone, array state, etc.
+    """
+
+    id: str | None = None
+
+    # Basic system info
+    version: str | None = None
+    name: str | None = None  # Machine hostname
+    time_zone: str | None = Field(default=None, alias="timeZone")
+    comment: str | None = None
+    security: str | None = None
+    workgroup: str | None = None
+    domain: str | None = None
+    domain_short: str | None = Field(default=None, alias="domainShort")
+
+    # Array configuration
+    max_arraysz: int | None = Field(default=None, alias="maxArraysz")
+    max_cachesz: int | None = Field(default=None, alias="maxCachesz")
+    sys_model: str | None = Field(default=None, alias="sysModel")
+    sys_array_slots: int | None = Field(default=None, alias="sysArraySlots")
+    sys_cache_slots: int | None = Field(default=None, alias="sysCacheSlots")
+    sys_flash_slots: int | None = Field(default=None, alias="sysFlashSlots")
+    device_count: int | None = Field(default=None, alias="deviceCount")
+
+    # Network/services
+    use_ssl: bool | None = Field(default=None, alias="useSsl")
+    port: int | None = None  # HTTP port
+    portssl: int | None = None  # HTTPS port
+    local_tld: str | None = Field(default=None, alias="localTld")
+    bind_mgt: bool | None = Field(default=None, alias="bindMgt")
+    use_telnet: bool | None = Field(default=None, alias="useTelnet")
+    port_telnet: int | None = Field(default=None, alias="porttelnet")
+    use_ssh: bool | None = Field(default=None, alias="useSsh")
+    port_ssh: int | None = Field(default=None, alias="portssh")
+
+    # NTP settings
+    use_ntp: bool | None = Field(default=None, alias="useNtp")
+    ntp_server1: str | None = Field(default=None, alias="ntpServer1")
+    ntp_server2: str | None = Field(default=None, alias="ntpServer2")
+    ntp_server3: str | None = Field(default=None, alias="ntpServer3")
+    ntp_server4: str | None = Field(default=None, alias="ntpServer4")
+
+    # File sharing settings
+    hide_dot_files: bool | None = Field(default=None, alias="hideDotFiles")
+    local_master: bool | None = Field(default=None, alias="localMaster")
+    enable_fruit: str | None = Field(default=None, alias="enableFruit")
+    share_smb_enabled: bool | None = Field(default=None, alias="shareSmbEnabled")
+    share_nfs_enabled: bool | None = Field(default=None, alias="shareNfsEnabled")
+    share_afp_enabled: bool | None = Field(default=None, alias="shareAfpEnabled")
+
+    # Array state
+    start_array: bool | None = Field(default=None, alias="startArray")
+    spindown_delay: str | None = Field(default=None, alias="spindownDelay")
+    safe_mode: bool | None = Field(default=None, alias="safeMode")
+    start_mode: str | None = Field(default=None, alias="startMode")
+    config_valid: bool | None = Field(default=None, alias="configValid")
+    config_error: str | None = Field(default=None, alias="configError")
+
+    # Flash info (in vars)
+    flash_guid: str | None = Field(default=None, alias="flashGuid")
+    flash_product: str | None = Field(default=None, alias="flashProduct")
+    flash_vendor: str | None = Field(default=None, alias="flashVendor")
+
+    # Registration info (in vars)
+    reg_check: str | None = Field(default=None, alias="regCheck")
+    reg_file: str | None = Field(default=None, alias="regFile")
+    reg_guid: str | None = Field(default=None, alias="regGuid")
+    reg_ty: str | None = Field(default=None, alias="regTy")
+    reg_state: str | None = Field(default=None, alias="regState")
+    reg_to: str | None = Field(default=None, alias="regTo")  # Registration owner
+
+    # Array/disk state
+    md_color: str | None = Field(default=None, alias="mdColor")
+    md_num_disks: int | None = Field(default=None, alias="mdNumDisks")
+    md_num_disabled: int | None = Field(default=None, alias="mdNumDisabled")
+    md_num_invalid: int | None = Field(default=None, alias="mdNumInvalid")
+    md_num_missing: int | None = Field(default=None, alias="mdNumMissing")
+    md_resync: int | None = Field(default=None, alias="mdResync")
+    md_resync_action: str | None = Field(default=None, alias="mdResyncAction")
+    md_resync_pos: str | None = Field(default=None, alias="mdResyncPos")
+    md_state: str | None = Field(default=None, alias="mdState")
+    md_version: str | None = Field(default=None, alias="mdVersion")
+
+    # Cache state
+    cache_num_devices: int | None = Field(default=None, alias="cacheNumDevices")
+
+    # Filesystem state
+    fs_state: str | None = Field(default=None, alias="fsState")
+    fs_progress: str | None = Field(default=None, alias="fsProgress")
+    fs_copy_prcnt: int | None = Field(default=None, alias="fsCopyPrcnt")
+    fs_num_mounted: int | None = Field(default=None, alias="fsNumMounted")
+    fs_num_unmountable: int | None = Field(default=None, alias="fsNumUnmountable")
+
+    # Share counts
+    share_count: int | None = Field(default=None, alias="shareCount")
+    share_smb_count: int | None = Field(default=None, alias="shareSmbCount")
+    share_nfs_count: int | None = Field(default=None, alias="shareNfsCount")
+    share_afp_count: int | None = Field(default=None, alias="shareAfpCount")
+    share_mover_active: bool | None = Field(default=None, alias="shareMoverActive")
+
+    # Security
+    csrf_token: str | None = Field(default=None, alias="csrfToken")
+
+
+# =============================================================================
+# Service Models
+# =============================================================================
+
+
+class ServiceUptime(UnraidBaseModel):
+    """Service uptime information."""
+
+    timestamp: str | None = None
+
+
+class Service(UnraidBaseModel):
+    """System service information."""
+
+    id: str
+    name: str
+    online: bool | None = None
+    uptime: ServiceUptime | None = None
+    version: str | None = None
+
+
+# =============================================================================
+# Flash Drive Models
+# =============================================================================
+
+
+class Flash(UnraidBaseModel):
+    """Flash drive information."""
+
+    id: str
+    product: str | None = None
+    vendor: str | None = None
+
+
+# =============================================================================
+# Owner Models
+# =============================================================================
+
+
+class Owner(UnraidBaseModel):
+    """Owner/user information."""
+
+    username: str
+    avatar: str | None = None
+    url: str | None = None
+
+
+# =============================================================================
+# Plugin Models
+# =============================================================================
+
+
+class Plugin(UnraidBaseModel):
+    """Plugin information from the Unraid API.
+
+    Attributes:
+        name: The name of the plugin package.
+        version: The version of the plugin package.
+        hasApiModule: Whether the plugin has an API module.
+        hasCliModule: Whether the plugin has a CLI module.
+
+    """
+
+    name: str
+    version: str
+    hasApiModule: bool | None = None
+    hasCliModule: bool | None = None
+
+
+# =============================================================================
+# Log File Models
+# =============================================================================
+
+
+class LogFile(UnraidBaseModel):
+    """Log file information.
+
+    Attributes:
+        name: Name of the log file.
+        path: Full path to the log file.
+        size: Size of the log file in bytes.
+        modifiedAt: Last modified timestamp.
+
+    """
+
+    name: str
+    path: str
+    size: int | None = None
+    modifiedAt: str | None = None
+
+
+class LogFileContent(UnraidBaseModel):
+    """Log file content.
+
+    Attributes:
+        path: Path to the log file.
+        content: Content of the log file.
+        totalLines: Total number of lines in the file.
+        startLine: Starting line number of the content (1-indexed).
+
+    """
+
+    path: str
+    content: str | None = None
+    totalLines: int | None = None
+    startLine: int | None = None
+
+
+# =============================================================================
+# Cloud/Connect Models
+# =============================================================================
+
+
+class ApiKeyResponse(UnraidBaseModel):
+    """API key response information.
+
+    Attributes:
+        valid: Whether the API key is valid.
+        error: Any error message.
+
+    """
+
+    valid: bool | None = None
+    error: str | None = None
+
+
+class CloudResponse(UnraidBaseModel):
+    """Cloud response information."""
+
+    status: str
+    ip: str | None = None
+    error: str | None = None
+
+
+class RelayResponse(UnraidBaseModel):
+    """Relay response information."""
+
+    status: str
+    timeout: str | None = None
+    error: str | None = None
+
+
+class MinigraphqlResponse(UnraidBaseModel):
+    """Minigraphql response information.
+
+    Attributes:
+        status: Status of minigraphql (PRE_INIT, CONNECTING, CONNECTED, etc).
+        timeout: Timeout value.
+        error: Any error message.
+
+    """
+
+    status: str | None = None
+    timeout: int | None = None
+    error: str | None = None
+
+
+class Cloud(UnraidBaseModel):
+    """Cloud settings information.
+
+    Attributes:
+        error: Any error message.
+        apiKey: API key response details.
+        relay: Relay connection status.
+        minigraphql: Minigraphql connection status.
+        cloud: Cloud connection status.
+        allowedOrigins: List of allowed origins.
+
+    """
+
+    error: str | None = None
+    apiKey: ApiKeyResponse | None = None
+    relay: RelayResponse | None = None
+    minigraphql: MinigraphqlResponse | None = None
+    cloud: CloudResponse | None = None
+    allowedOrigins: list[str] = []
+
+
+class DynamicRemoteAccessStatus(UnraidBaseModel):
+    """Dynamic remote access status.
+
+    Attributes:
+        enabledType: The type of dynamic remote access enabled.
+        runningType: The type of dynamic remote access currently running.
+        error: Any error message.
+
+    """
+
+    enabledType: str | None = None
+    runningType: str | None = None
+    error: str | None = None
+
+
+class Connect(UnraidBaseModel):
+    """Unraid Connect information.
+
+    Attributes:
+        id: Connect node ID.
+        dynamicRemoteAccess: Dynamic remote access status.
+
+    """
+
+    id: str | None = None
+    dynamicRemoteAccess: DynamicRemoteAccessStatus | None = None
+
+
+class RemoteAccess(UnraidBaseModel):
+    """Remote access configuration.
+
+    Attributes:
+        accessType: The type of WAN access (DYNAMIC, ALWAYS, DISABLED).
+        forwardType: The type of port forwarding (UPNP, STATIC).
+        port: The port used for remote access.
+
+    """
+
+    accessType: str | None = None
+    forwardType: str | None = None
+    port: int | None = None
 
 
 # =============================================================================

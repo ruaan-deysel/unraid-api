@@ -572,3 +572,587 @@ class TestServerInfo:
         assert info.sw_version == "7.1.4"
         assert info.lan_ip is None
         assert info.license_type is None
+
+
+class TestSystemMetrics:
+    """Tests for SystemMetrics model."""
+
+    def test_system_metrics_creation(self) -> None:
+        """Test creating SystemMetrics with all fields."""
+        from unraid_api.models import SystemMetrics
+
+        metrics = SystemMetrics(
+            cpu_percent=25.5,
+            memory_percent=50.0,
+            memory_total=34359738368,
+            memory_used=17179869184,
+            memory_free=17179869184,
+            memory_available=25769803776,
+            swap_percent=10.0,
+            swap_total=8589934592,
+            swap_used=858993459,
+            uptime=datetime(2024, 1, 15, 10, 30, 0, tzinfo=UTC),
+        )
+
+        assert metrics.cpu_percent == 25.5
+        assert metrics.memory_percent == 50.0
+        assert metrics.memory_total == 34359738368
+        assert metrics.memory_used == 17179869184
+        assert metrics.memory_available == 25769803776
+        assert metrics.swap_percent == 10.0
+        assert metrics.uptime is not None
+
+    def test_system_metrics_defaults(self) -> None:
+        """Test SystemMetrics with default values."""
+        from unraid_api.models import SystemMetrics
+
+        metrics = SystemMetrics()
+
+        assert metrics.cpu_percent is None
+        assert metrics.memory_percent is None
+        assert metrics.memory_total is None
+        assert metrics.uptime is None
+
+    def test_system_metrics_from_response(self) -> None:
+        """Test from_response with full data."""
+        from unraid_api.models import SystemMetrics
+
+        response = {
+            "metrics": {
+                "cpu": {"percentTotal": 25.5},
+                "memory": {
+                    "total": 34359738368,
+                    "used": 17179869184,
+                    "free": 17179869184,
+                    "available": 25769803776,
+                    "percentTotal": 50.0,
+                    "swapTotal": 8589934592,
+                    "swapUsed": 858993459,
+                    "percentSwapTotal": 10.0,
+                },
+            },
+            "info": {"os": {"uptime": "2024-01-15T10:30:00Z"}},
+        }
+
+        metrics = SystemMetrics.from_response(response)
+
+        assert metrics.cpu_percent == 25.5
+        assert metrics.memory_percent == 50.0
+        assert metrics.memory_total == 34359738368
+        assert metrics.memory_used == 17179869184
+        assert metrics.memory_available == 25769803776
+        assert metrics.swap_percent == 10.0
+        assert metrics.swap_total == 8589934592
+        assert metrics.swap_used == 858993459
+        assert metrics.uptime is not None
+
+    def test_system_metrics_from_response_minimal(self) -> None:
+        """Test from_response with minimal data."""
+        from unraid_api.models import SystemMetrics
+
+        response = {
+            "metrics": {
+                "cpu": {"percentTotal": 10.0},
+                "memory": {"percentTotal": 30.0},
+            },
+        }
+
+        metrics = SystemMetrics.from_response(response)
+
+        assert metrics.cpu_percent == 10.0
+        assert metrics.memory_percent == 30.0
+        assert metrics.memory_total is None
+        assert metrics.uptime is None
+
+    def test_system_metrics_from_response_empty(self) -> None:
+        """Test from_response with empty data."""
+        from unraid_api.models import SystemMetrics
+
+        response: dict[str, object] = {}
+
+        metrics = SystemMetrics.from_response(response)
+
+        assert metrics.cpu_percent is None
+        assert metrics.memory_percent is None
+        assert metrics.uptime is None
+
+
+class TestRegistrationModel:
+    """Tests for Registration model."""
+
+    def test_registration_with_all_fields(self) -> None:
+        """Test Registration creation with all fields."""
+        from unraid_api.models import Registration
+
+        reg = Registration(
+            id="registration:1",
+            type="Pro",
+            state="VALID",
+            expiration="2025-12-31",
+            updateExpiration="2025-12-31",
+        )
+
+        assert reg.id == "registration:1"
+        assert reg.type == "Pro"
+        assert reg.state == "VALID"
+        assert reg.expiration == "2025-12-31"
+
+    def test_registration_with_minimal_fields(self) -> None:
+        """Test Registration creation with minimal fields."""
+        from unraid_api.models import Registration
+
+        reg = Registration()
+
+        assert reg.id is None
+        assert reg.type is None
+        assert reg.state is None
+
+
+class TestVarsModel:
+    """Tests for Vars model (system configuration)."""
+
+    def test_vars_basic_creation(self) -> None:
+        """Test Vars model creation with basic fields."""
+        from unraid_api.models import Vars
+
+        vars_data = Vars(
+            id="vars:1",
+            version="7.2.3",
+            name="MyServer",
+            time_zone="America/New_York",
+        )
+
+        assert vars_data.id == "vars:1"
+        assert vars_data.version == "7.2.3"
+        assert vars_data.name == "MyServer"
+        assert vars_data.time_zone == "America/New_York"
+
+    def test_vars_from_graphql_response(self) -> None:
+        """Test Vars creation from GraphQL response with aliases."""
+        from unraid_api.models import Vars
+
+        # Response uses camelCase from GraphQL
+        data = {
+            "id": "vars:1",
+            "version": "7.2.3",
+            "name": "Cube",
+            "timeZone": "UTC",
+            "workgroup": "WORKGROUP",
+            "mdNumDisks": 4,
+            "mdState": "STARTED",
+            "fsState": "Running",
+            "shareCount": 10,
+            "shareSmbCount": 8,
+        }
+
+        vars_obj = Vars(**data)
+
+        assert vars_obj.name == "Cube"
+        assert vars_obj.time_zone == "UTC"
+        assert vars_obj.workgroup == "WORKGROUP"
+        assert vars_obj.md_num_disks == 4
+        assert vars_obj.md_state == "STARTED"
+        assert vars_obj.fs_state == "Running"
+        assert vars_obj.share_count == 10
+        assert vars_obj.share_smb_count == 8
+
+    def test_vars_with_optional_fields(self) -> None:
+        """Test Vars with optional fields as None."""
+        from unraid_api.models import Vars
+
+        vars_data = Vars(name="Server")
+
+        assert vars_data.name == "Server"
+        assert vars_data.version is None
+        assert vars_data.md_num_disks is None
+        assert vars_data.csrf_token is None
+
+    def test_vars_all_field_categories(self) -> None:
+        """Test Vars model with fields from all categories."""
+        from unraid_api.models import Vars
+
+        vars_data = Vars(
+            # Basic info
+            version="7.2.3",
+            name="Unraid",
+            time_zone="America/Chicago",
+            comment="My Unraid Server",
+            # Network
+            use_ssl=True,
+            port=80,
+            portssl=443,
+            use_ssh=True,
+            port_ssh=22,
+            # Array state
+            md_state="STARTED",
+            md_num_disks=8,
+            fs_state="Running",
+            # Shares
+            share_smb_enabled=True,
+            share_count=15,
+        )
+
+        assert vars_data.version == "7.2.3"
+        assert vars_data.use_ssl is True
+        assert vars_data.port == 80
+        assert vars_data.md_num_disks == 8
+        assert vars_data.share_count == 15
+
+
+class TestServiceModel:
+    """Tests for Service model."""
+
+    def test_service_with_all_fields(self) -> None:
+        """Test Service creation with all fields."""
+        from unraid_api.models import Service, ServiceUptime
+
+        service = Service(
+            id="service:docker",
+            name="docker",
+            online=True,
+            uptime=ServiceUptime(timestamp="2024-01-15T10:30:00Z"),
+            version="24.0.7",
+        )
+
+        assert service.id == "service:docker"
+        assert service.name == "docker"
+        assert service.online is True
+        assert service.uptime is not None
+        assert service.uptime.timestamp == "2024-01-15T10:30:00Z"
+        assert service.version == "24.0.7"
+
+
+class TestFlashModel:
+    """Tests for Flash model."""
+
+    def test_flash_with_all_fields(self) -> None:
+        """Test Flash creation with all fields."""
+        from unraid_api.models import Flash
+
+        flash = Flash(
+            id="flash:1",
+            product="Ultra Fit",
+            vendor="SanDisk",
+        )
+
+        assert flash.id == "flash:1"
+        assert flash.product == "Ultra Fit"
+        assert flash.vendor == "SanDisk"
+
+
+class TestOwnerModel:
+    """Tests for Owner model."""
+
+    def test_owner_with_all_fields(self) -> None:
+        """Test Owner creation with all fields."""
+        from unraid_api.models import Owner
+
+        owner = Owner(
+            username="admin",
+            avatar="https://example.com/avatar.png",
+            url="https://my.unraid.net",
+        )
+
+        assert owner.username == "admin"
+        assert owner.avatar == "https://example.com/avatar.png"
+        assert owner.url == "https://my.unraid.net"
+
+
+class TestPluginModel:
+    """Tests for Plugin model."""
+
+    def test_plugin_with_all_fields(self) -> None:
+        """Test Plugin creation with all fields."""
+        from unraid_api.models import Plugin
+
+        plugin = Plugin(
+            name="Test Plugin",
+            version="1.0.0",
+            hasApiModule=True,
+            hasCliModule=False,
+        )
+
+        assert plugin.name == "Test Plugin"
+        assert plugin.version == "1.0.0"
+        assert plugin.hasApiModule is True
+        assert plugin.hasCliModule is False
+
+    def test_plugin_with_minimal_fields(self) -> None:
+        """Test Plugin creation with minimal fields."""
+        from unraid_api.models import Plugin
+
+        plugin = Plugin(name="Test", version="1.0")
+
+        assert plugin.name == "Test"
+        assert plugin.version == "1.0"
+        assert plugin.hasApiModule is None
+        assert plugin.hasCliModule is None
+
+
+class TestDockerNetworkModel:
+    """Tests for DockerNetwork model."""
+
+    def test_docker_network_with_all_fields(self) -> None:
+        """Test DockerNetwork creation with all fields."""
+        from unraid_api.models import DockerNetwork
+
+        network = DockerNetwork(
+            id="network:bridge",
+            name="bridge",
+            created="2024-01-01T00:00:00Z",
+            scope="local",
+            driver="bridge",
+            enableIPv6=False,
+            internal=False,
+            attachable=False,
+            ingress=False,
+            configOnly=False,
+        )
+
+        assert network.id == "network:bridge"
+        assert network.name == "bridge"
+        assert network.driver == "bridge"
+
+
+class TestLogFileModels:
+    """Tests for LogFile and LogFileContent models."""
+
+    def test_log_file_creation(self) -> None:
+        """Test LogFile creation."""
+        from unraid_api.models import LogFile
+
+        log = LogFile(
+            name="syslog",
+            path="/var/log/syslog",
+            size=102400,
+            modifiedAt="2024-01-15T10:30:00Z",
+        )
+
+        assert log.name == "syslog"
+        assert log.path == "/var/log/syslog"
+        assert log.size == 102400
+
+    def test_log_file_content_creation(self) -> None:
+        """Test LogFileContent creation."""
+        from unraid_api.models import LogFileContent
+
+        content = LogFileContent(
+            path="/var/log/syslog",
+            content="Log entry 1\nLog entry 2\n",
+            totalLines=100,
+            startLine=1,
+        )
+
+        assert content.path == "/var/log/syslog"
+        assert content.content is not None
+        assert "Log entry 1" in content.content
+        assert content.totalLines == 100
+
+
+class TestCloudModel:
+    """Tests for Cloud model."""
+
+    def test_cloud_with_all_fields(self) -> None:
+        """Test Cloud creation with all fields."""
+        from unraid_api.models import (
+            ApiKeyResponse,
+            Cloud,
+            CloudResponse,
+            MinigraphqlResponse,
+            RelayResponse,
+        )
+
+        cloud = Cloud(
+            error=None,
+            apiKey=ApiKeyResponse(valid=True, error=None),
+            relay=RelayResponse(status="connected", timeout="5000", error=None),
+            minigraphql=MinigraphqlResponse(status="CONNECTED", timeout=30, error=None),
+            cloud=CloudResponse(status="ok", ip="192.168.1.100", error=None),
+            allowedOrigins=["http://localhost"],
+        )
+
+        assert cloud.cloud is not None
+        assert cloud.cloud.status == "ok"
+        assert cloud.apiKey is not None
+        assert cloud.apiKey.valid is True
+        assert len(cloud.allowedOrigins) == 1
+
+    def test_cloud_with_error(self) -> None:
+        """Test Cloud creation with error state."""
+        from unraid_api.models import ApiKeyResponse, Cloud, CloudResponse
+
+        cloud = Cloud(
+            error="Connection failed",
+            apiKey=ApiKeyResponse(valid=False, error="Invalid key"),
+            cloud=CloudResponse(status="error", error="Connection failed"),
+        )
+
+        assert cloud.error == "Connection failed"
+        assert cloud.cloud is not None
+        assert cloud.cloud.status == "error"
+
+
+class TestConnectModel:
+    """Tests for Connect model."""
+
+    def test_connect_signed_in(self) -> None:
+        """Test Connect creation when signed in."""
+        from unraid_api.models import Connect, DynamicRemoteAccessStatus
+
+        connect = Connect(
+            id="connect:1",
+            dynamicRemoteAccess=DynamicRemoteAccessStatus(
+                enabledType="UPNP",
+                runningType="UPNP",
+                error=None,
+            ),
+        )
+
+        assert connect.id == "connect:1"
+        assert connect.dynamicRemoteAccess is not None
+        assert connect.dynamicRemoteAccess.enabledType == "UPNP"
+
+    def test_connect_not_signed_in(self) -> None:
+        """Test Connect creation when not signed in."""
+        from unraid_api.models import Connect, DynamicRemoteAccessStatus
+
+        connect = Connect(
+            id="connect:1",
+            dynamicRemoteAccess=DynamicRemoteAccessStatus(
+                enabledType="DISABLED",
+                runningType="DISABLED",
+            ),
+        )
+
+        assert connect.dynamicRemoteAccess is not None
+        assert connect.dynamicRemoteAccess.enabledType == "DISABLED"
+
+
+class TestRemoteAccessModel:
+    """Tests for RemoteAccess model."""
+
+    def test_remote_access_enabled(self) -> None:
+        """Test RemoteAccess creation when enabled."""
+        from unraid_api.models import RemoteAccess
+
+        remote = RemoteAccess(
+            accessType="ALWAYS",
+            forwardType="UPNP",
+            port=443,
+        )
+
+        assert remote.accessType == "ALWAYS"
+        assert remote.forwardType == "UPNP"
+        assert remote.port == 443
+
+    def test_remote_access_disabled(self) -> None:
+        """Test RemoteAccess creation when disabled."""
+        from unraid_api.models import RemoteAccess
+
+        remote = RemoteAccess(accessType="DISABLED")
+
+        assert remote.accessType == "DISABLED"
+        assert remote.port is None
+
+
+class TestDockerContainerExtendedFields:
+    """Tests for extended DockerContainer fields."""
+
+    def test_container_with_extended_fields(self) -> None:
+        """Test DockerContainer with all extended fields."""
+        from unraid_api.models import ContainerHostConfig, DockerContainer
+
+        container = DockerContainer(
+            id="abc123",
+            name="test-container",
+            names=["/test-container"],
+            state="running",
+            status="Up 5 days",
+            image="nginx:latest",
+            imageId="sha256:abc123",
+            command="/docker-entrypoint.sh nginx",
+            created=1704067200,
+            sizeRootFs=150000000,
+            labels={"com.docker.compose.project": "test"},
+            networkSettings={"Networks": {"bridge": {}}},
+            mounts=[{"Type": "bind", "Source": "/data", "Destination": "/data"}],
+            hostConfig=ContainerHostConfig(networkMode="bridge"),
+        )
+
+        assert container.imageId == "sha256:abc123"
+        assert container.command == "/docker-entrypoint.sh nginx"
+        assert container.created == 1704067200
+        assert container.sizeRootFs == 150000000
+        assert container.labels is not None
+        assert container.labels["com.docker.compose.project"] == "test"
+        assert container.mounts is not None
+        assert len(container.mounts) == 1
+        assert container.hostConfig is not None
+        assert container.hostConfig.networkMode == "bridge"
+
+    def test_container_from_api_response_with_extended_fields(self) -> None:
+        """Test DockerContainer.from_api_response with extended fields."""
+        from unraid_api.models import DockerContainer
+
+        data = {
+            "id": "abc123",
+            "names": ["/myapp"],
+            "state": "running",
+            "status": "Up 2 hours",
+            "image": "myapp:latest",
+            "imageId": "sha256:def456",
+            "command": "python main.py",
+            "created": 1704067200,
+            "sizeRootFs": 200000000,
+            "labels": {"maintainer": "test"},
+            "networkSettings": {"IPAddress": "172.17.0.2"},
+            "mounts": [],
+            "hostConfig": {"networkMode": "host"},
+            "ports": [],
+        }
+
+        container = DockerContainer.from_api_response(data)
+
+        assert container.name == "myapp"
+        assert container.imageId == "sha256:def456"
+        assert container.command == "python main.py"
+        assert container.created == 1704067200
+        assert container.sizeRootFs == 200000000
+        assert container.hostConfig is not None
+        assert container.hostConfig.networkMode == "host"
+
+
+class TestUPSExtendedFields:
+    """Tests for UPS model extended fields."""
+
+    def test_ups_battery_with_health(self) -> None:
+        """Test UPSBattery with health field."""
+        from unraid_api.models import UPSBattery
+
+        battery = UPSBattery(
+            chargeLevel=100,
+            estimatedRuntime=1800,
+            health="Good",
+        )
+
+        assert battery.chargeLevel == 100
+        assert battery.estimatedRuntime == 1800
+        assert battery.health == "Good"
+
+    def test_ups_device_with_model(self) -> None:
+        """Test UPSDevice with model field."""
+        from unraid_api.models import UPSBattery, UPSDevice, UPSPower
+
+        device = UPSDevice(
+            id="ups:1",
+            name="APC UPS",
+            model="Back-UPS 1500",
+            status="online",
+            battery=UPSBattery(chargeLevel=95, estimatedRuntime=1200, health="Good"),
+            power=UPSPower(
+                inputVoltage=120.0, outputVoltage=120.0, loadPercentage=25.0
+            ),
+        )
+
+        assert device.model == "Back-UPS 1500"
+        assert device.battery.health == "Good"

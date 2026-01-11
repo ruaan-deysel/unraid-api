@@ -115,6 +115,8 @@ ruff format .
 mypy src/
 ```
 
+**Pre-commit MUST always be run before any commit.**
+
 ### Usage Example
 ```python
 from unraid_api import UnraidClient
@@ -134,6 +136,41 @@ async with UnraidClient("192.168.1.100", "your-api-key") as client:
 5. Add type hints to all parameters and return values
 6. Reference `UNRAIDAPI.md` for available GraphQL fields
 7. Run full lint/test suite before committing
+8. **Update documentation** (see Documentation Requirements below)
+9. **Update version numbers** (see Versioning below)
+
+## Documentation Requirements
+
+**README.md and CHANGELOG.md MUST always be kept up to date.**
+
+### README.md
+- Update API Reference tables when adding new methods
+- Update Models section when adding new Pydantic models
+- Keep usage examples current and working
+
+### CHANGELOG.md
+- Follow [Keep a Changelog](https://keepachangelog.com) format
+- Add entries under `[Unreleased]` section during development
+- Categories: Added, Changed, Deprecated, Removed, Fixed, Security
+- Move entries to versioned section on release
+
+## Versioning
+
+**Version numbers MUST be updated when new features or bug fixes are made.**
+
+### Semantic Versioning
+- **MAJOR** (X.0.0): Breaking API changes
+- **MINOR** (0.X.0): New features, backward compatible
+- **PATCH** (0.0.X): Bug fixes, backward compatible
+
+### Version Locations (update ALL)
+1. `pyproject.toml` → `version = "X.Y.Z"`
+2. `src/unraid_api/__init__.py` → `__version__ = "X.Y.Z"`
+
+### When to Bump
+- **New methods/models**: MINOR version bump
+- **Bug fixes**: PATCH version bump
+- **Breaking changes**: MAJOR version bump (rare)
 
 ## Dependencies
 

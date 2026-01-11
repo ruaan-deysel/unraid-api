@@ -1689,3 +1689,1446 @@ class TestGetServerInfoMethod:
                 assert result.model == "Unraid 7.0.0"
                 assert result.lan_ip is None
                 assert result.license_type is None
+
+
+class TestGetSystemMetricsMethod:
+    """Tests for get_system_metrics method (returns SystemMetrics model)."""
+
+    async def test_get_system_metrics(self) -> None:
+        """Test getting system metrics returns SystemMetrics model."""
+        from unraid_api.models import SystemMetrics
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "metrics": {
+                            "cpu": {"percentTotal": 25.5},
+                            "memory": {
+                                "total": 34359738368,
+                                "used": 17179869184,
+                                "free": 17179869184,
+                                "available": 25769803776,
+                                "percentTotal": 50.0,
+                                "swapTotal": 8589934592,
+                                "swapUsed": 0,
+                                "percentSwapTotal": 0.0,
+                            },
+                        },
+                        "info": {
+                            "os": {"uptime": "2024-01-15T10:30:00Z"},
+                        },
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_system_metrics()
+
+                assert isinstance(result, SystemMetrics)
+                assert result.cpu_percent == 25.5
+                assert result.memory_percent == 50.0
+                assert result.memory_total == 34359738368
+                assert result.memory_used == 17179869184
+                assert result.memory_available == 25769803776
+                assert result.swap_percent == 0.0
+                assert result.uptime is not None
+
+    async def test_get_system_metrics_minimal_response(self) -> None:
+        """Test system metrics with minimal response data."""
+        from unraid_api.models import SystemMetrics
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "metrics": {
+                            "cpu": {"percentTotal": 10.0},
+                            "memory": {"percentTotal": 30.0},
+                        },
+                        "info": {"os": {}},
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_system_metrics()
+
+                assert isinstance(result, SystemMetrics)
+                assert result.cpu_percent == 10.0
+                assert result.memory_percent == 30.0
+                assert result.uptime is None
+
+
+class TestTypedGetContainersMethod:
+    """Tests for typed_get_containers method (returns list[DockerContainer])."""
+
+    async def test_typed_get_containers(self) -> None:
+        """Test getting containers returns list of DockerContainer models."""
+        from unraid_api.models import DockerContainer
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "docker": {
+                            "containers": [
+                                {
+                                    "id": "container:abc123",
+                                    "names": ["/plex"],
+                                    "image": "plexinc/pms-docker",
+                                    "state": "running",
+                                    "status": "Up 5 days",
+                                    "autoStart": True,
+                                    "ports": [
+                                        {
+                                            "ip": "192.168.1.100",
+                                            "privatePort": 32400,
+                                            "publicPort": 32400,
+                                            "type": "tcp",
+                                        }
+                                    ],
+                                },
+                                {
+                                    "id": "container:def456",
+                                    "names": ["/sonarr"],
+                                    "image": "linuxserver/sonarr",
+                                    "state": "stopped",
+                                    "status": "Exited (0) 2 hours ago",
+                                    "autoStart": False,
+                                    "ports": [],
+                                },
+                            ]
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.typed_get_containers()
+
+                assert isinstance(result, list)
+                assert len(result) == 2
+                assert all(isinstance(c, DockerContainer) for c in result)
+                assert result[0].id == "container:abc123"
+                assert result[0].name == "plex"
+                assert result[0].state == "running"
+                assert result[0].image == "plexinc/pms-docker"
+                assert len(result[0].ports) == 1
+                assert result[1].id == "container:def456"
+                assert result[1].name == "sonarr"
+                assert result[1].state == "stopped"
+
+    async def test_typed_get_containers_empty(self) -> None:
+        """Test getting containers returns empty list when none exist."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={"data": {"docker": {"containers": []}}},
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.typed_get_containers()
+
+                assert isinstance(result, list)
+                assert len(result) == 0
+
+
+class TestTypedGetVmsMethod:
+    """Tests for typed_get_vms method (returns list[VmDomain])."""
+
+    async def test_typed_get_vms(self) -> None:
+        """Test getting VMs returns list of VmDomain models."""
+        from unraid_api.models import VmDomain
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "vms": {
+                            "domains": [
+                                {
+                                    "id": "vm:win10",
+                                    "name": "Windows 10",
+                                    "state": "RUNNING",
+                                },
+                                {
+                                    "id": "vm:ubuntu",
+                                    "name": "Ubuntu Server",
+                                    "state": "SHUTOFF",
+                                },
+                            ]
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.typed_get_vms()
+
+                assert isinstance(result, list)
+                assert len(result) == 2
+                assert all(isinstance(vm, VmDomain) for vm in result)
+                assert result[0].id == "vm:win10"
+                assert result[0].name == "Windows 10"
+                assert result[0].state == "RUNNING"
+                assert result[1].id == "vm:ubuntu"
+                assert result[1].state == "SHUTOFF"
+
+    async def test_typed_get_vms_empty(self) -> None:
+        """Test getting VMs returns empty list when none exist."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={"data": {"vms": {"domains": []}}},
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.typed_get_vms()
+
+                assert isinstance(result, list)
+                assert len(result) == 0
+
+
+class TestTypedGetUpsDevicesMethod:
+    """Tests for typed_get_ups_devices method (returns list[UPSDevice])."""
+
+    async def test_typed_get_ups_devices(self) -> None:
+        """Test getting UPS devices returns list of UPSDevice models."""
+        from unraid_api.models import UPSDevice
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "upsDevices": [
+                            {
+                                "id": "ups:cyberpower",
+                                "name": "CyberPower UPS",
+                                "model": "CP1500AVRLCD",
+                                "status": "OL",
+                                "battery": {
+                                    "chargeLevel": 100,
+                                    "estimatedRuntime": 3600,
+                                },
+                                "power": {
+                                    "inputVoltage": 120.5,
+                                    "outputVoltage": 120.0,
+                                    "loadPercentage": 25.0,
+                                },
+                            }
+                        ]
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.typed_get_ups_devices()
+
+                assert isinstance(result, list)
+                assert len(result) == 1
+                assert isinstance(result[0], UPSDevice)
+                assert result[0].id == "ups:cyberpower"
+                assert result[0].name == "CyberPower UPS"
+                assert result[0].status == "OL"
+                assert result[0].battery.chargeLevel == 100
+                assert result[0].power.loadPercentage == 25.0
+
+    async def test_typed_get_ups_devices_empty(self) -> None:
+        """Test getting UPS devices returns empty list when none exist."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={"data": {"upsDevices": []}},
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.typed_get_ups_devices()
+
+                assert isinstance(result, list)
+                assert len(result) == 0
+
+
+class TestTypedGetArrayMethod:
+    """Tests for typed_get_array method (returns UnraidArray model)."""
+
+    async def test_typed_get_array(self) -> None:
+        """Test getting array returns UnraidArray model."""
+        from unraid_api.models import UnraidArray
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "array": {
+                            "state": "STARTED",
+                            "capacity": {
+                                "kilobytes": {
+                                    "total": 10000000000,
+                                    "used": 4000000000,
+                                    "free": 6000000000,
+                                }
+                            },
+                            "parityCheckStatus": {
+                                "status": "IDLE",
+                                "progress": 0,
+                                "running": False,
+                                "errors": 0,
+                            },
+                            "boot": {
+                                "id": "disk:boot",
+                                "name": "flash",
+                                "device": "sdc",
+                                "size": 32000000,
+                            },
+                            "parities": [
+                                {
+                                    "id": "disk:parity1",
+                                    "idx": 0,
+                                    "name": "Parity",
+                                    "device": "sda",
+                                    "size": 4000000000,
+                                    "status": "DISK_OK",
+                                    "temp": 35,
+                                    "isSpinning": True,
+                                }
+                            ],
+                            "disks": [
+                                {
+                                    "id": "disk:disk1",
+                                    "idx": 1,
+                                    "name": "Disk 1",
+                                    "device": "sdb",
+                                    "size": 4000000000,
+                                    "status": "DISK_OK",
+                                    "temp": 38,
+                                    "isSpinning": True,
+                                    "fsSize": 3900000000,
+                                    "fsUsed": 2000000000,
+                                    "fsFree": 1900000000,
+                                }
+                            ],
+                            "caches": [],
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.typed_get_array()
+
+                assert isinstance(result, UnraidArray)
+                assert result.state == "STARTED"
+                assert result.capacity.kilobytes.total == 10000000000
+                assert len(result.parities) == 1
+                assert result.parities[0].id == "disk:parity1"
+                assert result.parities[0].temp == 35
+                assert len(result.disks) == 1
+                assert result.disks[0].name == "Disk 1"
+                assert result.boot is not None
+                assert result.boot.name == "flash"
+
+
+class TestTypedGetSharesMethod:
+    """Tests for typed_get_shares method (returns list[Share])."""
+
+    async def test_typed_get_shares(self) -> None:
+        """Test getting shares returns list of Share models."""
+        from unraid_api.models import Share
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "shares": [
+                            {
+                                "id": "share:appdata",
+                                "name": "appdata",
+                                "size": 0,
+                                "used": 50000000,
+                                "free": 100000000,
+                            },
+                            {
+                                "id": "share:media",
+                                "name": "media",
+                                "size": 500000000,
+                                "used": 300000000,
+                                "free": 200000000,
+                            },
+                        ]
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.typed_get_shares()
+
+                assert isinstance(result, list)
+                assert len(result) == 2
+                assert all(isinstance(s, Share) for s in result)
+                assert result[0].id == "share:appdata"
+                assert result[0].name == "appdata"
+                assert result[1].id == "share:media"
+                assert result[1].size == 500000000
+
+    async def test_typed_get_shares_empty(self) -> None:
+        """Test getting shares returns empty list when none exist."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={"data": {"shares": []}},
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.typed_get_shares()
+
+                assert isinstance(result, list)
+                assert len(result) == 0
+
+
+class TestGetNotificationOverviewMethod:
+    """Tests for get_notification_overview method (returns NotificationOverview)."""
+
+    async def test_get_notification_overview(self) -> None:
+        """Test getting notification overview returns NotificationOverview model."""
+        from unraid_api.models import NotificationOverview
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "notifications": {
+                            "overview": {
+                                "unread": {
+                                    "info": 3,
+                                    "warning": 1,
+                                    "alert": 0,
+                                    "total": 4,
+                                },
+                                "archive": {
+                                    "info": 50,
+                                    "warning": 10,
+                                    "alert": 2,
+                                    "total": 62,
+                                },
+                            }
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_notification_overview()
+
+                assert isinstance(result, NotificationOverview)
+                assert result.unread.info == 3
+                assert result.unread.warning == 1
+                assert result.unread.alert == 0
+                assert result.unread.total == 4
+                assert result.archive.total == 62
+
+    async def test_get_notification_overview_empty(self) -> None:
+        """Test notification overview with no notifications."""
+        from unraid_api.models import NotificationOverview
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "notifications": {
+                            "overview": {
+                                "unread": {
+                                    "info": 0,
+                                    "warning": 0,
+                                    "alert": 0,
+                                    "total": 0,
+                                },
+                                "archive": {
+                                    "info": 0,
+                                    "warning": 0,
+                                    "alert": 0,
+                                    "total": 0,
+                                },
+                            }
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_notification_overview()
+
+                assert isinstance(result, NotificationOverview)
+                assert result.unread.total == 0
+                assert result.archive.total == 0
+
+
+class TestGetRegistrationMethod:
+    """Tests for get_registration and typed_get_registration methods."""
+
+    async def test_get_registration(self) -> None:
+        """Test getting registration information."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "registration": {
+                            "id": "registration:1",
+                            "type": "Pro",
+                            "state": "VALID",
+                            "expiration": "2025-12-31",
+                            "updateExpiration": "2025-12-31",
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_registration()
+
+                assert result["id"] == "registration:1"
+                assert result["type"] == "Pro"
+                assert result["state"] == "VALID"
+
+    async def test_typed_get_registration(self) -> None:
+        """Test getting registration as Pydantic model."""
+        from unraid_api.models import Registration
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "registration": {
+                            "id": "registration:1",
+                            "type": "Pro",
+                            "state": "VALID",
+                            "expiration": None,
+                            "updateExpiration": None,
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.typed_get_registration()
+
+                assert isinstance(result, Registration)
+                assert result.id == "registration:1"
+                assert result.type == "Pro"
+                assert result.state == "VALID"
+
+
+class TestGetVarsMethod:
+    """Tests for get_vars method."""
+
+    async def test_get_vars(self) -> None:
+        """Test getting system variables."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "vars": {
+                            "id": "vars:1",
+                            "version": "7.2.3",
+                            "name": "Cube",
+                            "timeZone": "UTC",
+                            "mdNumDisks": 4,
+                            "mdState": "STARTED",
+                            "fsState": "Running",
+                            "shareCount": 10,
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_vars()
+
+                assert result["id"] == "vars:1"
+                assert result["version"] == "7.2.3"
+                assert result["name"] == "Cube"
+                assert result["timeZone"] == "UTC"
+                assert result["mdNumDisks"] == 4
+
+    async def test_typed_get_vars(self) -> None:
+        """Test getting system variables as Pydantic model."""
+        from unraid_api.models import Vars
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "vars": {
+                            "id": "vars:1",
+                            "version": "7.2.3",
+                            "name": "Cube",
+                            "timeZone": "America/New_York",
+                            "mdState": "STARTED",
+                            "shareCount": 15,
+                            "shareSmbEnabled": True,
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.typed_get_vars()
+
+                assert isinstance(result, Vars)
+                assert result.name == "Cube"
+                assert result.time_zone == "America/New_York"
+                assert result.md_state == "STARTED"
+                assert result.share_count == 15
+                assert result.share_smb_enabled is True
+
+
+class TestGetServicesMethod:
+    """Tests for get_services and typed_get_services methods."""
+
+    async def test_get_services(self) -> None:
+        """Test getting services list."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "services": [
+                            {
+                                "id": "service:sshd",
+                                "name": "sshd",
+                                "online": True,
+                                "uptime": {"timestamp": "2024-01-15T10:30:00Z"},
+                                "version": "9.6",
+                            },
+                            {
+                                "id": "service:docker",
+                                "name": "docker",
+                                "online": True,
+                                "uptime": {"timestamp": "2024-01-15T10:30:00Z"},
+                                "version": "24.0.7",
+                            },
+                        ]
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_services()
+
+                assert len(result) == 2
+                assert result[0]["name"] == "sshd"
+                assert result[0]["online"] is True
+
+    async def test_typed_get_services(self) -> None:
+        """Test getting services as Pydantic models."""
+        from unraid_api.models import Service
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "services": [
+                            {
+                                "id": "service:sshd",
+                                "name": "sshd",
+                                "online": True,
+                                "uptime": {"timestamp": "2024-01-15T10:30:00Z"},
+                                "version": "9.6",
+                            },
+                        ]
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.typed_get_services()
+
+                assert len(result) == 1
+                assert isinstance(result[0], Service)
+                assert result[0].name == "sshd"
+                assert result[0].online is True
+
+
+class TestGetFlashMethod:
+    """Tests for get_flash and typed_get_flash methods."""
+
+    async def test_get_flash(self) -> None:
+        """Test getting flash drive information."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "flash": {
+                            "id": "flash:1",
+                            "product": "Ultra Fit",
+                            "vendor": "SanDisk",
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_flash()
+
+                assert result["vendor"] == "SanDisk"
+
+    async def test_typed_get_flash(self) -> None:
+        """Test getting flash drive as Pydantic model."""
+        from unraid_api.models import Flash
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "flash": {
+                            "id": "flash:1",
+                            "product": "Ultra Fit",
+                            "vendor": "SanDisk",
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.typed_get_flash()
+
+                assert isinstance(result, Flash)
+                assert result.vendor == "SanDisk"
+
+
+class TestGetOwnerMethod:
+    """Tests for get_owner and typed_get_owner methods."""
+
+    async def test_get_owner(self) -> None:
+        """Test getting owner information."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "owner": {
+                            "username": "admin",
+                            "avatar": "https://example.com/avatar.png",
+                            "url": "https://my.unraid.net",
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_owner()
+
+                assert result["username"] == "admin"
+
+    async def test_typed_get_owner(self) -> None:
+        """Test getting owner as Pydantic model."""
+        from unraid_api.models import Owner
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "owner": {
+                            "username": "admin",
+                            "avatar": None,
+                            "url": None,
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.typed_get_owner()
+
+                assert isinstance(result, Owner)
+                assert result.username == "admin"
+
+
+class TestGetPluginsMethod:
+    """Tests for get_plugins and typed_get_plugins methods."""
+
+    async def test_get_plugins(self) -> None:
+        """Test getting installed plugins."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "plugins": [
+                            {
+                                "name": "Dynamix System Stats",
+                                "version": "2024.01.01",
+                                "hasApiModule": True,
+                                "hasCliModule": False,
+                            }
+                        ]
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_plugins()
+
+                assert len(result) == 1
+                assert result[0]["name"] == "Dynamix System Stats"
+
+    async def test_typed_get_plugins(self) -> None:
+        """Test getting plugins as Pydantic models."""
+        from unraid_api.models import Plugin
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "plugins": [
+                            {
+                                "name": "Test Plugin",
+                                "version": "1.0",
+                                "hasApiModule": True,
+                                "hasCliModule": None,
+                            }
+                        ]
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.typed_get_plugins()
+
+                assert len(result) == 1
+                assert isinstance(result[0], Plugin)
+                assert result[0].hasApiModule is True
+
+
+class TestGetDockerNetworksMethod:
+    """Tests for get_docker_networks and typed_get_docker_networks methods."""
+
+    async def test_get_docker_networks(self) -> None:
+        """Test getting Docker networks."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "docker": {
+                            "networks": [
+                                {
+                                    "id": "network:bridge",
+                                    "name": "bridge",
+                                    "created": "2024-01-01T00:00:00Z",
+                                    "scope": "local",
+                                    "driver": "bridge",
+                                    "enableIPv6": False,
+                                    "internal": False,
+                                    "attachable": False,
+                                    "ingress": False,
+                                    "configOnly": False,
+                                }
+                            ]
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_docker_networks()
+
+                assert len(result) == 1
+                assert result[0]["name"] == "bridge"
+
+    async def test_typed_get_docker_networks(self) -> None:
+        """Test getting Docker networks as Pydantic models."""
+        from unraid_api.models import DockerNetwork
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "docker": {
+                            "networks": [
+                                {
+                                    "id": "network:br0",
+                                    "name": "br0",
+                                    "created": None,
+                                    "scope": "local",
+                                    "driver": "macvlan",
+                                    "enableIPv6": False,
+                                    "internal": False,
+                                    "attachable": False,
+                                    "ingress": False,
+                                    "configOnly": False,
+                                }
+                            ]
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.typed_get_docker_networks()
+
+                assert len(result) == 1
+                assert isinstance(result[0], DockerNetwork)
+                assert result[0].driver == "macvlan"
+
+
+class TestGetLogFilesMethod:
+    """Tests for get_log_files and typed_get_log_files methods."""
+
+    async def test_get_log_files(self) -> None:
+        """Test getting log files list."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "logFiles": [
+                            {
+                                "id": "log:syslog",
+                                "name": "syslog",
+                                "path": "/var/log/syslog",
+                            },
+                            {
+                                "id": "log:docker",
+                                "name": "docker",
+                                "path": "/var/log/docker.log",
+                            },
+                        ]
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_log_files()
+
+                assert len(result) == 2
+                assert result[0]["name"] == "syslog"
+
+    async def test_typed_get_log_files(self) -> None:
+        """Test getting log files as Pydantic models."""
+        from unraid_api.models import LogFile
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "logFiles": [
+                            {
+                                "id": "log:syslog",
+                                "name": "syslog",
+                                "path": "/var/log/syslog",
+                            }
+                        ]
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.typed_get_log_files()
+
+                assert len(result) == 1
+                assert isinstance(result[0], LogFile)
+                assert result[0].path == "/var/log/syslog"
+
+    async def test_get_log_file(self) -> None:
+        """Test getting log file contents."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "logFile": {"log": "Jan 1 00:00:00 server test: Log entry\n"}
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_log_file("log:syslog")
+
+                assert "log" in result
+                assert "Log entry" in result["log"]
+
+
+class TestGetCloudMethod:
+    """Tests for get_cloud and typed_get_cloud methods."""
+
+    async def test_get_cloud(self) -> None:
+        """Test getting cloud settings."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "cloud": {
+                            "error": None,
+                            "apiKey": {"valid": True, "error": None},
+                            "relay": {"status": "connected", "timeout": "5000"},
+                            "minigraphql": {"status": "CONNECTED", "timeout": 30},
+                            "cloud": {"status": "ok", "ip": "192.168.1.100"},
+                            "allowedOrigins": ["http://localhost"],
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_cloud()
+
+                assert result["cloud"]["status"] == "ok"
+
+    async def test_typed_get_cloud(self) -> None:
+        """Test getting cloud settings as Pydantic model."""
+        from unraid_api.models import Cloud
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "cloud": {
+                            "error": None,
+                            "apiKey": {"valid": True, "error": None},
+                            "relay": None,
+                            "minigraphql": {"status": "CONNECTED"},
+                            "cloud": {"status": "ok", "ip": None},
+                            "allowedOrigins": [],
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.typed_get_cloud()
+
+                assert isinstance(result, Cloud)
+                assert result.cloud is not None
+                assert result.cloud.status == "ok"
+
+
+class TestGetConnectMethod:
+    """Tests for get_connect and typed_get_connect methods."""
+
+    async def test_get_connect(self) -> None:
+        """Test getting Unraid Connect information."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "connect": {
+                            "id": "connect:1",
+                            "dynamicRemoteAccess": {
+                                "enabledType": "UPNP",
+                                "runningType": "UPNP",
+                                "error": None,
+                            },
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_connect()
+
+                assert result["dynamicRemoteAccess"]["enabledType"] == "UPNP"
+
+    async def test_typed_get_connect(self) -> None:
+        """Test getting Connect as Pydantic model."""
+        from unraid_api.models import Connect
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "connect": {
+                            "id": "connect:1",
+                            "dynamicRemoteAccess": {
+                                "enabledType": "DISABLED",
+                                "runningType": "DISABLED",
+                                "error": None,
+                            },
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.typed_get_connect()
+
+                assert isinstance(result, Connect)
+                assert result.dynamicRemoteAccess is not None
+                assert result.dynamicRemoteAccess.enabledType == "DISABLED"
+
+
+class TestGetRemoteAccessMethod:
+    """Tests for get_remote_access and typed_get_remote_access methods."""
+
+    async def test_get_remote_access(self) -> None:
+        """Test getting remote access configuration."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "remoteAccess": {
+                            "accessType": "ALWAYS",
+                            "forwardType": "UPNP",
+                            "port": 443,
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_remote_access()
+
+                assert result["accessType"] == "ALWAYS"
+                assert result["port"] == 443
+
+    async def test_typed_get_remote_access(self) -> None:
+        """Test getting remote access as Pydantic model."""
+        from unraid_api.models import RemoteAccess
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "remoteAccess": {
+                            "accessType": "DISABLED",
+                            "forwardType": None,
+                            "port": None,
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.typed_get_remote_access()
+
+                assert isinstance(result, RemoteAccess)
+                assert result.accessType == "DISABLED"
+
+
+class TestNotificationMutations:
+    """Tests for notification mutation methods."""
+
+    async def test_archive_notification(self) -> None:
+        """Test archiving a notification."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "notifications": {
+                            "archive": {"id": "notification:123", "title": "Test"}
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.archive_notification("notification:123")
+
+                assert "notifications" in result
+                assert result["notifications"]["archive"]["id"] == "notification:123"
+
+    async def test_unarchive_notification(self) -> None:
+        """Test unarchiving a notification."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "notifications": {
+                            "unread": {"id": "notification:123", "title": "Test"}
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.unarchive_notification("notification:123")
+
+                assert "notifications" in result
+
+    async def test_delete_notification(self) -> None:
+        """Test deleting a notification."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={"data": {"notifications": {"delete": True}}},
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.delete_notification("notification:123")
+
+                assert result["notifications"]["delete"] is True
+
+    async def test_archive_all_notifications(self) -> None:
+        """Test archiving all notifications."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={"data": {"notifications": {"archiveAll": True}}},
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.archive_all_notifications()
+
+                assert result["notifications"]["archiveAll"] is True
+
+    async def test_delete_all_notifications(self) -> None:
+        """Test deleting all notifications."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={"data": {"notifications": {"deleteAll": True}}},
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.delete_all_notifications()
+
+                assert result["notifications"]["deleteAll"] is True
+
+
+class TestResetVmMethod:
+    """Tests for reset_vm method."""
+
+    async def test_reset_vm(self) -> None:
+        """Test resetting a virtual machine."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={"data": {"vm": {"reset": True}}},
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.reset_vm("vm:test-vm")
+
+                assert result["vm"]["reset"] is True
+
+
+class TestArrayDiskManagementMethods:
+    """Tests for array disk management methods."""
+
+    async def test_add_array_disk(self) -> None:
+        """Test adding a disk to the array."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "array": {
+                            "addDisk": {
+                                "id": "disk:sdb",
+                                "name": "disk1",
+                                "status": "active",
+                            }
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.add_array_disk("disk:sdb")
+
+                assert result["array"]["addDisk"]["id"] == "disk:sdb"
+
+    async def test_remove_array_disk(self) -> None:
+        """Test removing a disk from the array."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "array": {
+                            "removeDisk": {
+                                "id": "disk:sdb",
+                                "name": "disk1",
+                                "status": "unassigned",
+                            }
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.remove_array_disk("disk:sdb")
+
+                assert "removeDisk" in result["array"]
+
+    async def test_clear_disk_stats(self) -> None:
+        """Test clearing disk statistics."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "array": {
+                            "clearStatistics": {"id": "disk:sdb", "name": "disk1"}
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.clear_disk_stats("disk:sdb")
+
+                assert "clearStatistics" in result["array"]

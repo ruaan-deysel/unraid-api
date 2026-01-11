@@ -8,8 +8,6 @@
 
 An async Python client library for the Unraid GraphQL API (v4.21.0+, Unraid 7.1.4+).
 
-**Primary consumer:** [ha-unraid](https://github.com/ruaan-deysel/ha-unraid) Home Assistant integration
-
 ## Features
 
 - 🔄 **Async/await** - Built with `aiohttp` for non-blocking operations
@@ -166,6 +164,8 @@ async with UnraidClient(host, api_key) as client:
 
 ### UnraidClient
 
+#### Core Methods
+
 | Method | Description |
 |--------|-------------|
 | `test_connection()` | Test if server is reachable |
@@ -173,10 +173,60 @@ async with UnraidClient(host, api_key) as client:
 | `get_server_info()` | Get server info for device registration |
 | `query(query, variables)` | Execute GraphQL query |
 | `mutate(mutation, variables)` | Execute GraphQL mutation |
+
+#### High-Level Typed Methods (Pydantic Models)
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `get_system_metrics()` | `SystemMetrics` | CPU, memory, uptime, notifications |
+| `typed_get_array()` | `UnraidArray` | Array state, capacity, disks |
+| `typed_get_containers()` | `list[DockerContainer]` | All Docker containers |
+| `typed_get_vms()` | `list[VmDomain]` | All virtual machines |
+| `typed_get_ups_devices()` | `list[UPSDevice]` | UPS devices with battery info |
+| `typed_get_shares()` | `list[Share]` | User shares with usage |
+| `get_notification_overview()` | `NotificationOverview` | Notification counts |
+| `typed_get_vars()` | `Vars` | System configuration variables |
+| `typed_get_registration()` | `Registration` | License information |
+| `typed_get_services()` | `list[Service]` | System services status |
+| `typed_get_flash()` | `Flash` | Flash drive info |
+| `typed_get_owner()` | `Owner` | Owner information |
+| `typed_get_plugins()` | `list[Plugin]` | Installed API plugins |
+| `typed_get_docker_networks()` | `list[DockerNetwork]` | Docker networks |
+| `typed_get_log_files()` | `list[LogFile]` | Available log files |
+| `typed_get_cloud()` | `Cloud` | Unraid Connect cloud status |
+| `typed_get_connect()` | `Connect` | Connect configuration |
+| `typed_get_remote_access()` | `RemoteAccess` | Remote access settings |
+
+#### Raw Data Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `get_array_status()` | `dict` | Array state and capacity |
+| `get_disks()` | `list[dict]` | Physical disks |
+| `get_shares()` | `list[dict]` | User shares |
+| `get_containers()` | `list[dict]` | Docker containers |
+| `get_vms()` | `list[dict]` | Virtual machines |
+| `get_ups_status()` | `list[dict]` | UPS devices |
+| `get_notifications()` | `list[dict]` | Notifications |
+| `get_parity_history()` | `list[dict]` | Parity check history |
+| `get_services()` | `list[dict]` | System services |
+| `get_plugins()` | `list[dict]` | Installed plugins |
+| `get_docker_networks()` | `list[dict]` | Docker networks |
+| `get_log_files()` | `list[dict]` | Log files |
+| `get_log_file(path)` | `dict` | Log file contents |
+
+#### Control Methods
+
+| Method | Description |
+|--------|-------------|
 | `start_container(id)` | Start Docker container |
 | `stop_container(id)` | Stop Docker container |
+| `restart_container(id)` | Restart Docker container |
 | `start_vm(id)` | Start VM |
-| `stop_vm(id)` | Stop VM |
+| `stop_vm(id)` | Stop VM (graceful) |
+| `force_stop_vm(id)` | Force stop VM |
+| `pause_vm(id)` | Pause VM |
+| `resume_vm(id)` | Resume paused VM |
 | `start_array()` | Start disk array |
 | `stop_array()` | Stop disk array |
 | `start_parity_check(correct)` | Start parity check |
@@ -188,17 +238,42 @@ async with UnraidClient(host, api_key) as client:
 
 ### Models
 
+#### System Models
 - `ServerInfo` - Server info for HA device registration
 - `SystemInfo` - System information
+- `SystemMetrics` - CPU, memory, uptime metrics
+- `Vars` - System configuration variables
+- `Registration` - License/registration info
+- `Flash` - Flash drive information
+- `Owner` - Server owner info
+
+#### Storage Models
 - `UnraidArray` - Array state and disks
-- `ArrayDisk` - Individual disk info
+- `ArrayDisk` - Individual array disk
 - `ArrayCapacity` - Capacity calculations
-- `DockerContainer` - Container details
-- `VmDomain` - VM details
-- `UPSDevice` - UPS status
-- `Share` - User share info
-- `PhysicalDisk` - Physical disk info
+- `PhysicalDisk` - Physical disk details
+- `Share` - User share with usage
+
+#### Docker/VM Models
+- `DockerContainer` - Container with ports, state, mounts
+- `DockerNetwork` - Docker network configuration
+- `VmDomain` - Virtual machine details
+
+#### Service Models
+- `Service` - System service status
+- `UPSDevice` - UPS with battery/power info
+- `Plugin` - Installed plugin info
+- `LogFile` - Log file metadata
+- `LogFileContent` - Log file contents
+
+#### Network Models
+- `Cloud` - Unraid Connect cloud status
+- `Connect` - Connect configuration
+- `RemoteAccess` - Remote access settings
+
+#### Notification Models
 - `Notification` - System notification
+- `NotificationOverview` - Notification counts
 
 ## Requirements
 
