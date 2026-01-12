@@ -54,6 +54,30 @@ class UnraidConnectionError(UnraidAPIError):
         super().__init__(message)
 
 
+class UnraidSSLError(UnraidConnectionError):
+    """Exception raised when SSL certificate verification fails.
+
+    This exception is raised for SSL/TLS-related errors including:
+    - Certificate verification failures
+    - Certificate hostname mismatches
+    - TLS handshake errors
+    - Self-signed certificate issues
+
+    Inherits from UnraidConnectionError for backwards compatibility,
+    allowing it to be caught with either UnraidSSLError or
+    UnraidConnectionError.
+    """
+
+    def __init__(self, message: str = "SSL certificate verification failed") -> None:
+        """Initialize the exception.
+
+        Args:
+            message: Human-readable error message.
+
+        """
+        super().__init__(message)
+
+
 class UnraidAuthenticationError(UnraidAPIError):
     """Exception raised when authentication fails."""
 

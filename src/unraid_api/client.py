@@ -12,6 +12,7 @@ from unraid_api.exceptions import (
     UnraidAPIError,
     UnraidAuthenticationError,
     UnraidConnectionError,
+    UnraidSSLError,
     UnraidTimeoutError,
 )
 
@@ -321,6 +322,8 @@ class UnraidClient:
 
         except TimeoutError as err:
             raise UnraidTimeoutError(f"Request timed out: {err}") from err
+        except aiohttp.ClientSSLError as err:
+            raise UnraidSSLError(f"SSL certificate verification failed: {err}") from err
         except aiohttp.ClientError as err:
             raise UnraidConnectionError(f"Connection failed: {err}") from err
 

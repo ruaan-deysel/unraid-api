@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "unraid-api"
-version = "1.3.1"
+version = "1.4.0"
 description = "Python client library for Unraid's official GraphQL API"
 readme = "README.md"
 license = "MIT"
@@ -94,6 +94,7 @@ select = [
     "ASYNC",  # flake8-async
 ]
 ignore = [
+    "PLR0912",  # Too many branches (client.py _make_request)
     "PLR0913",  # Too many arguments
     "PLR2004",  # Magic value comparison
     "PLC0415",  # Import not at top of file (used for lazy imports)

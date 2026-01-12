@@ -123,14 +123,21 @@ async def main() -> None:
             tests.append(("get_array_status", f"FAIL: {e}"))
             print(f"✗ get_array_status: {e}")
 
-        # 10. Disks
+        # 10. Array Disks (safe - doesn't wake sleeping disks)
         try:
-            result = await client.get_disks()
-            tests.append(("get_disks", "PASS"))
-            print(f"✓ get_disks: {len(result)} disks")
+            result = await client.get_array_disks()
+            total_disks = len(result.get("disks", []))
+            parities = len(result.get("parities", []))
+            caches = len(result.get("caches", []))
+            # Count spinning vs standby disks
+            all_disks = result.get("disks", []) + result.get("parities", []) + result.get("caches", [])
+            spinning = sum(1 for d in all_disks if d.get("isSpinning"))
+            standby = len(all_disks) - spinning
+            tests.append(("get_array_disks", "PASS"))
+            print(f"✓ get_array_disks: {total_disks} data, {parities} parity, {caches} cache ({spinning} spinning, {standby} standby)")
         except Exception as e:
-            tests.append(("get_disks", f"FAIL: {e}"))
-            print(f"✗ get_disks: {e}")
+            tests.append(("get_array_disks", f"FAIL: {e}"))
+            print(f"✗ get_array_disks: {e}")
 
         # 11. Shares
         try:

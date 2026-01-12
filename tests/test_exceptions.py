@@ -6,6 +6,7 @@ from unraid_api.exceptions import (
     UnraidAPIError,
     UnraidAuthenticationError,
     UnraidConnectionError,
+    UnraidSSLError,
     UnraidTimeoutError,
 )
 
@@ -110,6 +111,42 @@ class TestUnraidTimeoutError:
         assert isinstance(error, UnraidAPIError)
 
 
+class TestUnraidSSLError:
+    """Tests for UnraidSSLError."""
+
+    def test_default_message(self) -> None:
+        """Test default error message."""
+        error = UnraidSSLError()
+
+        assert str(error) == "SSL certificate verification failed"
+
+    def test_custom_message(self) -> None:
+        """Test custom error message."""
+        error = UnraidSSLError("Certificate hostname mismatch")
+
+        assert str(error) == "Certificate hostname mismatch"
+
+    def test_is_unraid_connection_error(self) -> None:
+        """Test that it's a subclass of UnraidConnectionError."""
+        error = UnraidSSLError()
+
+        assert isinstance(error, UnraidConnectionError)
+
+    def test_is_unraid_api_error(self) -> None:
+        """Test that it's a subclass of UnraidAPIError."""
+        error = UnraidSSLError()
+
+        assert isinstance(error, UnraidAPIError)
+
+    def test_can_catch_with_connection_error(self) -> None:
+        """Test that SSL error can be caught as connection error."""
+        try:
+            raise UnraidSSLError("SSL failed")
+        except UnraidConnectionError as e:
+            assert isinstance(e, UnraidSSLError)
+            assert str(e) == "SSL failed"
+
+
 class TestExceptionHierarchy:
     """Tests for exception hierarchy."""
 
@@ -119,6 +156,7 @@ class TestExceptionHierarchy:
             UnraidConnectionError(),
             UnraidAuthenticationError(),
             UnraidTimeoutError(),
+            UnraidSSLError(),
         ]
 
         for exc in exceptions:
@@ -131,6 +169,7 @@ class TestExceptionHierarchy:
             UnraidConnectionError,
             UnraidAuthenticationError,
             UnraidTimeoutError,
+            UnraidSSLError,
         ]
 
         for exc_class in exceptions_to_test:
@@ -138,3 +177,10 @@ class TestExceptionHierarchy:
                 raise exc_class()
             except UnraidAPIError as e:
                 assert isinstance(e, exc_class)
+
+    def test_ssl_error_inherits_from_connection_error(self) -> None:
+        """Test that UnraidSSLError inherits from UnraidConnectionError."""
+        error = UnraidSSLError()
+
+        assert isinstance(error, UnraidConnectionError)
+        assert isinstance(error, UnraidAPIError)

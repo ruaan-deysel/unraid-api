@@ -144,6 +144,7 @@ from unraid_api.exceptions import (
     UnraidAPIError,
     UnraidAuthenticationError,
     UnraidConnectionError,
+    UnraidSSLError,
     UnraidTimeoutError,
 )
 
@@ -152,6 +153,8 @@ async with UnraidClient(host, api_key) as client:
         await client.query("query { online }")
     except UnraidAuthenticationError:
         print("Invalid API key")
+    except UnraidSSLError:
+        print("SSL certificate verification failed")
     except UnraidConnectionError:
         print("Cannot reach server")
     except UnraidTimeoutError:
@@ -274,6 +277,18 @@ async with UnraidClient(host, api_key) as client:
 #### Notification Models
 - `Notification` - System notification
 - `NotificationOverview` - Notification counts
+
+### Exceptions
+
+| Exception | Parent | Description |
+|-----------|--------|-------------|
+| `UnraidAPIError` | `Exception` | Base exception for all API errors |
+| `UnraidConnectionError` | `UnraidAPIError` | Connection failures |
+| `UnraidSSLError` | `UnraidConnectionError` | SSL certificate verification failures |
+| `UnraidAuthenticationError` | `UnraidAPIError` | Authentication failures (invalid API key) |
+| `UnraidTimeoutError` | `UnraidAPIError` | Request timeout |
+
+**Note:** `UnraidSSLError` inherits from `UnraidConnectionError`, so it can be caught with either exception type for backwards compatibility.
 
 ## Requirements
 

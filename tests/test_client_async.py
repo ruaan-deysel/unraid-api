@@ -13,8 +13,27 @@ from unraid_api.exceptions import (
     UnraidAPIError,
     UnraidAuthenticationError,
     UnraidConnectionError,
+    UnraidSSLError,
     UnraidTimeoutError,
 )
+
+
+def create_ssl_error(
+    host: str = "192.168.1.100", port: int = 443
+) -> aiohttp.ClientSSLError:
+    """Create a mock aiohttp SSL error for testing."""
+    os_error = OSError(1, "certificate verify failed")
+
+    class MockConnectionKey:
+        pass
+
+    mock_key = MockConnectionKey()
+    mock_key.ssl = True  # type: ignore[attr-defined]
+    mock_key.host = host  # type: ignore[attr-defined]
+    mock_key.port = port  # type: ignore[attr-defined]
+    mock_key.is_ssl = True  # type: ignore[attr-defined]
+
+    return aiohttp.ClientSSLError(mock_key, os_error)
 
 
 class TestClientContextManager:
@@ -138,6 +157,25 @@ class TestRedirectDiscovery:
             async with UnraidClient(
                 "192.168.1.100", "test-key", verify_ssl=False
             ) as client:
+                redirect_url, use_ssl = await client._discover_redirect_url()
+
+                assert redirect_url is None
+                assert use_ssl is True
+
+    async def test_discover_fallback_to_https_on_ssl_error(self) -> None:
+        """Test discovery falls back to HTTPS on SSL error (doesn't raise)."""
+        ssl_error = create_ssl_error()
+
+        with aioresponses() as m:
+            m.get(
+                "http://192.168.1.100/graphql",
+                exception=ssl_error,
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                # Discovery should catch SSL errors and fall back to HTTPS
                 redirect_url, use_ssl = await client._discover_redirect_url()
 
                 assert redirect_url is None
@@ -286,6 +324,47 @@ class TestGraphQLQuery:
             ) as client:
                 with pytest.raises(UnraidTimeoutError):
                     await client.query("query { online }")
+
+    async def test_query_ssl_error(self) -> None:
+        """Test query with SSL certificate error."""
+        ssl_error = create_ssl_error()
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                exception=ssl_error,
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                with pytest.raises(UnraidSSLError) as exc_info:
+                    await client.query("query { online }")
+
+                assert "SSL" in str(exc_info.value)
+
+    async def test_ssl_error_is_catchable_as_connection_error(self) -> None:
+        """Test that UnraidSSLError can be caught as UnraidConnectionError."""
+        ssl_error = create_ssl_error()
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                exception=ssl_error,
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                # Should be catchable as UnraidConnectionError for backwards compat
+                with pytest.raises(UnraidConnectionError) as exc_info:
+                    await client.query("query { online }")
+
+                # But should actually be UnraidSSLError
+                assert isinstance(exc_info.value, UnraidSSLError)
+                assert isinstance(exc_info.value, UnraidSSLError)
 
 
 class TestMutate:

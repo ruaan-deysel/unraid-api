@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-01-13
+
+### Added
+- New `UnraidSSLError` exception for SSL/TLS certificate verification failures
+  - Raised when SSL certificate verification fails, hostname mismatches, or TLS handshake errors occur
+  - Inherits from `UnraidConnectionError` for backwards compatibility
+  - Enables cleaner error handling without string matching (fixes #4)
+- Added `PLR0912` (too many branches) to ruff ignore list for complex error handling
+
+### Changed
+- SSL errors are now caught specifically and re-raised as `UnraidSSLError` instead of generic `UnraidConnectionError`
+
 ## [1.3.1] - 2026-01-11
 
 ### Added

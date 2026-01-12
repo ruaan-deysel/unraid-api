@@ -5,6 +5,7 @@ from unraid_api.exceptions import (
     UnraidAPIError,
     UnraidAuthenticationError,
     UnraidConnectionError,
+    UnraidSSLError,
     UnraidTimeoutError,
 )
 from unraid_api.models import (
@@ -83,9 +84,10 @@ __all__ = [
     "UnraidAuthenticationError",
     "UnraidClient",
     "UnraidConnectionError",
+    "UnraidSSLError",
     "UnraidTimeoutError",
     "Vars",
     "VmDomain",
 ]
 
-__version__ = "1.3.1"
+__version__ = "1.4.0"
