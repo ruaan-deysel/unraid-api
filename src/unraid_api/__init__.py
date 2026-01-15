@@ -1,5 +1,6 @@
 """Unraid API - Python client library for Unraid's official GraphQL API."""
 
+from unraid_api._version import __version__
 from unraid_api.client import UnraidClient
 from unraid_api.exceptions import (
     UnraidAPIError,
@@ -88,6 +89,5 @@ __all__ = [
     "UnraidTimeoutError",
     "Vars",
     "VmDomain",
+    "__version__",
 ]
-
-__version__ = "1.4.0"
