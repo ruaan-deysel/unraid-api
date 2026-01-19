@@ -1,0 +1,15 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "projectTitle": "unraid-api",
+  "description": "Async Python client library for Unraid's official GraphQL API (v4.21.0+, Unraid 7.1.4+)",
+  "folders": [],
+  "excludeFolders": ["tests", "scripts", ".venv", ".git", "__pycache__", "*.egg-info"],
+  "excludeFiles": ["CHANGELOG.md", "LICENSE", ".gitignore", ".pre-commit-config.yaml"],
+  "rules": [
+    "Use async/await patterns - this is an async-first library",
+    "Use the UnraidClient as a context manager: async with UnraidClient(...) as client:",
+    "Always use GraphQL variables for parameters, never string interpolation",
+    "Handle exceptions using the UnraidAPIError hierarchy",
+    "Use Pydantic models from models.py for type-safe responses"
+  ]
+}
