@@ -336,3 +336,7 @@ Contributions welcome! Please ensure:
 - [Official Unraid API Repository](https://github.com/unraid/api)
 - [GraphQL API Reference](UNRAIDAPI.md)
 - [PyPI Package](https://pypi.org/project/unraid-api/)
+
+## Disclaimer
+
+Unraid® is a registered trademark of Lime Technology, Inc. This project is not affiliated with, endorsed, or sponsored by Lime Technology, Inc.
