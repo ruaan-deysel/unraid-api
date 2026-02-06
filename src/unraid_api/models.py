@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 
 def _parse_datetime(value: str | datetime | None) -> datetime | None:
@@ -27,6 +27,12 @@ def _parse_datetime(value: str | datetime | None) -> datetime | None:
         normalized = value.replace("Z", "+00:00") if value.endswith("Z") else value
         return datetime.fromisoformat(normalized)
     return None
+
+
+# Reusable annotated type for datetime fields parsed from ISO format strings.
+# Use this instead of repeating @field_validator("field", mode="before") on
+# every datetime field.
+ParsedDatetime = Annotated[datetime | None, BeforeValidator(_parse_datetime)]
 
 
 class UnraidBaseModel(BaseModel):
@@ -70,14 +76,8 @@ class InfoOs(UnraidBaseModel):
     """Operating system information (hostname, uptime, kernel)."""
 
     hostname: str | None = None
-    uptime: datetime | None = None
+    uptime: ParsedDatetime = None
     kernel: str | None = None
-
-    @field_validator("uptime", mode="before")
-    @classmethod
-    def parse_uptime(cls, value: str | datetime | None) -> datetime | None:
-        """Parse uptime from ISO format string."""
-        return _parse_datetime(value)
 
 
 class CoreVersions(UnraidBaseModel):
@@ -97,17 +97,11 @@ class InfoVersions(UnraidBaseModel):
 class SystemInfo(UnraidBaseModel):
     """Complete system information."""
 
-    time: datetime | None = None
+    time: ParsedDatetime = None
     system: InfoSystem = InfoSystem()
     cpu: InfoCpu = InfoCpu()
     os: InfoOs = InfoOs()
     versions: InfoVersions = InfoVersions()
-
-    @field_validator("time", mode="before")
-    @classmethod
-    def parse_time(cls, value: str | datetime | None) -> datetime | None:
-        """Parse time from ISO format string."""
-        return _parse_datetime(value)
 
 
 # =============================================================================
@@ -523,14 +517,8 @@ class Notification(UnraidBaseModel):
     importance: str | None = None
     link: str | None = None
     type: str | None = None
-    timestamp: datetime | None = None
+    timestamp: ParsedDatetime = None
     formattedTimestamp: str | None = None
-
-    @field_validator("timestamp", mode="before")
-    @classmethod
-    def parse_timestamp(cls, value: str | datetime | None) -> datetime | None:
-        """Parse timestamp from ISO format string."""
-        return _parse_datetime(value)
 
 
 class NotificationOverviewCounts(UnraidBaseModel):
@@ -593,13 +581,7 @@ class SystemMetrics(UnraidBaseModel):
     swap_used: int | None = None  # Used swap in bytes
 
     # Uptime
-    uptime: datetime | None = None  # System boot time
-
-    @field_validator("uptime", mode="before")
-    @classmethod
-    def parse_uptime(cls, value: str | datetime | None) -> datetime | None:
-        """Parse uptime from ISO format string."""
-        return _parse_datetime(value)
+    uptime: ParsedDatetime = None  # System boot time
 
     @classmethod
     def from_response(cls, data: dict[str, Any]) -> SystemMetrics:
@@ -1084,18 +1066,3 @@ class RemoteAccess(UnraidBaseModel):
     accessType: str | None = None
     forwardType: str | None = None
     port: int | None = None
-
-
-# =============================================================================
-# Response Type Aliases
-# =============================================================================
-
-# Type aliases for API response data
-SystemInfoResponse = dict[str, Any]
-ArrayResponse = dict[str, Any]
-ContainersResponse = dict[str, Any]
-VmsResponse = dict[str, Any]
-UpsResponse = dict[str, Any]
-SharesResponse = dict[str, Any]
-NotificationsResponse = dict[str, Any]
-DisksResponse = dict[str, Any]

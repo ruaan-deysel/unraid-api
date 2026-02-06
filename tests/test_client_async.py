@@ -102,7 +102,101 @@ class TestRedirectDiscovery:
     async def test_discover_http_no_redirect(self) -> None:
         """Test discovery when server accepts HTTP (no SSL)."""
         with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+            # GraphQL endpoint returns a non-redirect response (GET not supported)
+            m.get(
+                "http://192.168.1.100/graphql",
+                status=400,
+                body='{"errors":[{"message":"GET not supported"}]}',
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                redirect_url, use_ssl = await client._discover_redirect_url()
+
+                assert redirect_url is None
+                assert use_ssl is False
+
+    async def test_discover_http_no_redirect_status_200(self) -> None:
+        """Test discovery when server returns 200 on HTTP (no SSL)."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=200)
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                redirect_url, use_ssl = await client._discover_redirect_url()
+
+                assert redirect_url is None
+                assert use_ssl is False
+
+    async def test_discover_same_port_assumes_https(self) -> None:
+        """Test that http_port == https_port skips probe and assumes HTTPS."""
+        async with UnraidClient(
+            "192.168.1.100",
+            "test-key",
+            http_port=4443,
+            https_port=4443,
+            verify_ssl=False,
+        ) as client:
+            redirect_url, use_ssl = await client._discover_redirect_url()
+
+            assert redirect_url is None
+            assert use_ssl is True
+
+    async def test_discover_same_port_default_443(self) -> None:
+        """Test that http_port == https_port == 443 assumes HTTPS."""
+        async with UnraidClient(
+            "192.168.1.100",
+            "test-key",
+            http_port=443,
+            https_port=443,
+            verify_ssl=False,
+        ) as client:
+            redirect_url, use_ssl = await client._discover_redirect_url()
+
+            assert redirect_url is None
+            assert use_ssl is True
+
+    async def test_discover_nginx_400_https_port(self) -> None:
+        """Test detection of nginx 400 'plain HTTP to HTTPS port' response."""
+        nginx_body = (
+            "<html>\n"
+            "<head><title>400 The plain HTTP request was sent to HTTPS port"
+            "</title></head>\n"
+            "<body>\n"
+            "<center><h1>400 Bad Request</h1></center>\n"
+            "<center>The plain HTTP request was sent to HTTPS port</center>\n"
+            "</body>\n"
+            "</html>\n"
+        )
+        with aioresponses() as m:
+            m.get(
+                "http://192.168.1.100:8080/graphql",
+                status=400,
+                body=nginx_body,
+            )
+
+            async with UnraidClient(
+                "192.168.1.100",
+                "test-key",
+                http_port=8080,
+                https_port=4443,
+                verify_ssl=False,
+            ) as client:
+                redirect_url, use_ssl = await client._discover_redirect_url()
+
+                assert redirect_url is None
+                assert use_ssl is True
+
+    async def test_discover_generic_400_is_http(self) -> None:
+        """Test that a generic 400 (not nginx HTTPS error) means HTTP mode."""
+        with aioresponses() as m:
+            m.get(
+                "http://192.168.1.100/graphql",
+                status=400,
+                body="Bad Request",
+            )
 
             async with UnraidClient(
                 "192.168.1.100", "test-key", verify_ssl=False
@@ -128,6 +222,79 @@ class TestRedirectDiscovery:
 
                 assert redirect_url == "https://192.168.1.100/graphql"
                 assert use_ssl is True
+
+    async def test_discover_https_redirect_with_port_443(self) -> None:
+        """Test discovery normalizes redirect URL when port is 443."""
+        with aioresponses() as m:
+            m.get(
+                "http://192.168.1.100/graphql",
+                status=302,
+                headers={"Location": "https://192.168.1.100:443/graphql"},
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                redirect_url, use_ssl = await client._discover_redirect_url()
+
+                # Port 443 should be normalized away
+                assert redirect_url == "https://192.168.1.100/graphql"
+                assert use_ssl is True
+
+    async def test_discover_redirect_without_location_in_get(self) -> None:
+        """Test discovery when redirect response has no Location header."""
+        with aioresponses() as m:
+            m.get(
+                "http://192.168.1.100/graphql",
+                status=302,
+                # No Location header
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                redirect_url, use_ssl = await client._discover_redirect_url()
+
+                # Falls through to "HTTP endpoint accessible"
+                assert redirect_url is None
+                assert use_ssl is False
+
+    async def test_discover_redirect_to_non_https(self) -> None:
+        """Test discovery when redirect goes to non-HTTPS URL."""
+        with aioresponses() as m:
+            m.get(
+                "http://192.168.1.100/graphql",
+                status=302,
+                headers={"Location": "http://other-host.local/graphql"},
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                redirect_url, use_ssl = await client._discover_redirect_url()
+
+                # Non-HTTPS, non-myunraid redirect falls through
+                assert redirect_url is None
+                assert use_ssl is False
+
+    async def test_discover_without_session(self) -> None:
+        """Test discovery creates session if none exists."""
+        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        assert client._session is None
+
+        with aioresponses() as m:
+            m.get(
+                "http://192.168.1.100/graphql",
+                status=200,
+            )
+
+            redirect_url, use_ssl = await client._discover_redirect_url()
+
+            assert redirect_url is None
+            assert use_ssl is False
+            assert client._session is not None
+
+        await client.close()
 
     async def test_discover_myunraid_redirect(self) -> None:
         """Test discovery when server redirects to myunraid.net."""
@@ -1435,6 +1602,113 @@ class TestEdgeCases:
             ) as client:
                 result = await client.query("query { online }")
                 assert result == {"online": True}
+
+    async def test_discover_raises_if_session_creation_fails(self) -> None:
+        """Test _discover_redirect_url raises if session stays None."""
+        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+
+        # Patch _create_session to be a no-op so _session stays None
+        async def noop_create() -> None:
+            pass
+
+        client._create_session = noop_create  # type: ignore[assignment]
+
+        with pytest.raises(
+            UnraidConnectionError, match="Failed to create HTTP session"
+        ):
+            await client._discover_redirect_url()
+
+    async def test_make_request_raises_if_session_creation_fails(self) -> None:
+        """Test _make_request raises if session stays None."""
+        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+
+        async def noop_create() -> None:
+            pass
+
+        client._create_session = noop_create  # type: ignore[assignment]
+
+        with pytest.raises(
+            UnraidConnectionError, match="Failed to create HTTP session"
+        ):
+            await client._make_request({"query": "query { online }"})
+
+    async def test_make_request_skips_discovery_when_url_resolved(self) -> None:
+        """Test _make_request skips discovery when URL already resolved."""
+        with aioresponses() as m:
+            # Only mock the POST, no GET needed since URL is pre-resolved
+            m.post(
+                "https://192.168.1.100/graphql",
+                payload={"data": {"online": True}},
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                # Pre-set resolved URL to skip discovery
+                client._resolved_url = "https://192.168.1.100/graphql"
+                result = await client.query("query { online }")
+
+                assert result == {"online": True}
+
+    async def test_make_request_creates_session_if_none(self) -> None:
+        """Test that _make_request creates session if none exists."""
+        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        assert client._session is None
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=200)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={"data": {"online": True}},
+            )
+
+            result = await client.query("query { online }")
+            assert result == {"online": True}
+            assert client._session is not None
+
+        await client.close()
+
+    async def test_make_request_uses_redirect_url_from_discovery(self) -> None:
+        """Test that _make_request uses redirect URL from discovery."""
+        with aioresponses() as m:
+            # Redirect to myunraid.net (Strict mode)
+            m.get(
+                "http://192.168.1.100/graphql",
+                status=302,
+                headers={"Location": "https://myserver.myunraid.net/graphql"},
+            )
+            m.post(
+                "https://myserver.myunraid.net/graphql",
+                payload={"data": {"online": True}},
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.query("query { online }")
+
+                assert result == {"online": True}
+                assert client._resolved_url == "https://myserver.myunraid.net/graphql"
+
+    async def test_query_with_non_dict_error_items(self) -> None:
+        """Test query handles non-dict error items in GraphQL response."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {},
+                    "errors": ["Simple string error", "Another error"],
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                with pytest.raises(UnraidAPIError) as exc_info:
+                    await client.query("query { invalid }")
+
+                assert "Simple string error" in str(exc_info.value)
 
     async def test_partial_failure_returns_data(self) -> None:
         """Test that partial failures return data with errors logged."""
@@ -2836,6 +3110,121 @@ class TestGetLogFilesMethod:
 
                 assert "log" in result
                 assert "Log entry" in result["log"]
+
+    async def test_get_log_file_with_lines(self) -> None:
+        """Test getting log file contents with lines parameter."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "logFile": {
+                            "path": "/var/log/syslog",
+                            "content": "Line 1\nLine 2\n",
+                            "totalLines": 100,
+                            "startLine": 90,
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_log_file("log:syslog", lines=10)
+
+                assert "content" in result
+                assert result["totalLines"] == 100
+
+
+class TestGetArrayDisksMethod:
+    """Tests for get_array_disks method."""
+
+    async def test_get_array_disks(self) -> None:
+        """Test getting array disk info without waking disks."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "array": {
+                            "boot": {
+                                "id": "boot:0",
+                                "name": "Flash",
+                                "device": "sda",
+                                "size": 16000000000,
+                                "status": "DISK_OK",
+                                "type": "Flash",
+                                "temp": None,
+                                "fsSize": 15000000000,
+                                "fsUsed": 5000000000,
+                                "fsFree": 10000000000,
+                                "fsType": "vfat",
+                            },
+                            "disks": [
+                                {
+                                    "id": "disk:1",
+                                    "idx": 1,
+                                    "name": "Disk 1",
+                                    "device": "sdb",
+                                    "size": 4000000000000,
+                                    "status": "DISK_OK",
+                                    "type": "Data",
+                                    "temp": 35,
+                                    "fsSize": 3900000000000,
+                                    "fsUsed": 2000000000000,
+                                    "fsFree": 1900000000000,
+                                    "fsType": "xfs",
+                                    "isSpinning": True,
+                                }
+                            ],
+                            "parities": [
+                                {
+                                    "id": "parity:0",
+                                    "idx": 0,
+                                    "name": "Parity",
+                                    "device": "sdc",
+                                    "size": 4000000000000,
+                                    "status": "DISK_OK",
+                                    "type": "Parity",
+                                    "temp": 33,
+                                    "isSpinning": True,
+                                }
+                            ],
+                            "caches": [
+                                {
+                                    "id": "cache:0",
+                                    "idx": 0,
+                                    "name": "Cache",
+                                    "device": "nvme0n1",
+                                    "size": 500000000000,
+                                    "status": "DISK_OK",
+                                    "type": "Cache",
+                                    "temp": 40,
+                                    "fsSize": 480000000000,
+                                    "fsUsed": 100000000000,
+                                    "fsFree": 380000000000,
+                                    "fsType": "btrfs",
+                                    "isSpinning": False,
+                                }
+                            ],
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_array_disks()
+
+                assert result["boot"]["id"] == "boot:0"
+                assert len(result["disks"]) == 1
+                assert result["disks"][0]["isSpinning"] is True
+                assert len(result["parities"]) == 1
+                assert len(result["caches"]) == 1
 
 
 class TestGetCloudMethod:

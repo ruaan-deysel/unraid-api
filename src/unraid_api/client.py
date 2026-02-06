@@ -183,6 +183,17 @@ class UnraidClient:
             raise UnraidConnectionError("Failed to create HTTP session")
 
         clean_host = self._get_clean_host()
+
+        # Short-circuit: if http_port == https_port, the port is serving HTTPS.
+        # Sending a plain HTTP probe would get a 400 from nginx, so skip it.
+        if self.http_port == self.https_port:
+            _LOGGER.debug(
+                "http_port == https_port (%d), assuming HTTPS for %s",
+                self.http_port,
+                clean_host,
+            )
+            return (None, True)
+
         http_port_suffix = (
             "" if self.http_port == DEFAULT_HTTP_PORT else f":{self.http_port}"
         )
@@ -228,6 +239,17 @@ class UnraidClient:
                                 normalized,
                             )
                             return (normalized, True)
+
+                # Detect nginx returning 400 when plain HTTP hits an HTTPS port
+                if response.status == 400:
+                    body = await response.text()
+                    if "the plain http request was sent to https port" in body.lower():
+                        _LOGGER.info(
+                            "HTTP probe got 400 'plain HTTP to HTTPS port' from %s, "
+                            "server requires HTTPS",
+                            clean_host,
+                        )
+                        return (None, True)
 
                 # HTTP endpoint is accessible (SSL/TLS mode is "No")
                 _LOGGER.info(
