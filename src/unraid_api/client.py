@@ -265,6 +265,14 @@ class UnraidClient:
                 return (None, False)
 
         except aiohttp.ClientError as err:
+            # When the user specified a custom (non-default) HTTP port and
+            # that port is unreachable, raise immediately — don't silently
+            # fall back to HTTPS on a different port.  See GitHub issue #9.
+            if self.http_port != DEFAULT_HTTP_PORT:
+                raise UnraidConnectionError(
+                    f"Cannot connect to {clean_host} on port {self.http_port}: {err}"
+                ) from err
+
             _LOGGER.debug("HTTP check failed, will try HTTPS: %s", err)
 
         return (None, True)
