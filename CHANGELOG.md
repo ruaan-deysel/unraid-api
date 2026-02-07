@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-02-07
+
+### Fixed
+
+- Silent fallback to default HTTPS port when HTTP probe fails on user-specified port (fixes #9)
+  - When a non-default `http_port` is specified and the port is unreachable, `UnraidConnectionError` is now raised instead of silently connecting on port 443
+  - Default port (80) behavior is unchanged — HTTPS fallback still works for standard HTTP→HTTPS upgrade
+
 ## [1.4.1] - 2026-02-07
 
 ### Added

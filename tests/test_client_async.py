@@ -344,8 +344,12 @@ class TestRedirectDiscovery:
                 assert redirect_url == "https://myserver.myunraid.net/graphql"
                 assert use_ssl is True
 
-    async def test_discover_fallback_to_https_on_error(self) -> None:
-        """Test discovery falls back to HTTPS on connection error."""
+    async def test_discover_fallback_to_https_on_error_default_port(self) -> None:
+        """Test discovery falls back to HTTPS on connection error with default port.
+
+        When using the default HTTP port (80), a connection error should fall
+        back to HTTPS — this is standard HTTP→HTTPS upgrade behavior.
+        """
         with aioresponses() as m:
             m.get(
                 "http://192.168.1.100/graphql",
@@ -359,6 +363,88 @@ class TestRedirectDiscovery:
 
                 assert redirect_url is None
                 assert use_ssl is True
+
+    async def test_discover_raises_on_error_custom_http_port(self) -> None:
+        """Test discovery raises UnraidConnectionError when custom port is unreachable.
+
+        When the user specifies a non-default http_port (e.g., 880) and that
+        port is unreachable, the library should raise instead of silently
+        falling back to HTTPS on port 443. See GitHub issue #9.
+        """
+        with aioresponses() as m:
+            m.get(
+                "http://192.168.1.100:880/graphql",
+                exception=aiohttp.ClientError("Connection refused"),
+            )
+
+            async with UnraidClient(
+                "192.168.1.100",
+                "test-key",
+                http_port=880,
+                verify_ssl=False,
+            ) as client:
+                with pytest.raises(UnraidConnectionError, match="port 880"):
+                    await client._discover_redirect_url()
+
+    async def test_discover_raises_on_timeout_custom_http_port(self) -> None:
+        """Test discovery raises when custom port times out."""
+        with aioresponses() as m:
+            m.get(
+                "http://192.168.1.100:8080/graphql",
+                exception=aiohttp.ClientError("Connection timeout"),
+            )
+
+            async with UnraidClient(
+                "192.168.1.100",
+                "test-key",
+                http_port=8080,
+                verify_ssl=False,
+            ) as client:
+                with pytest.raises(UnraidConnectionError, match="port 8080"):
+                    await client._discover_redirect_url()
+
+    async def test_discover_custom_port_success_still_works(self) -> None:
+        """Test that a custom port that actually works still functions.
+
+        When the custom port is reachable and returns a valid HTTP response,
+        normal redirect discovery should proceed as usual.
+        """
+        with aioresponses() as m:
+            m.get(
+                "http://192.168.1.100:880/graphql",
+                status=302,
+                headers={"Location": "https://192.168.1.100/graphql"},
+            )
+
+            async with UnraidClient(
+                "192.168.1.100",
+                "test-key",
+                http_port=880,
+                verify_ssl=False,
+            ) as client:
+                redirect_url, use_ssl = await client._discover_redirect_url()
+
+                assert redirect_url == "https://192.168.1.100/graphql"
+                assert use_ssl is True
+
+    async def test_discover_custom_port_http_no_redirect(self) -> None:
+        """Test that a reachable custom HTTP port with no redirect works."""
+        with aioresponses() as m:
+            m.get(
+                "http://192.168.1.100:880/graphql",
+                status=200,
+            )
+
+            async with UnraidClient(
+                "192.168.1.100",
+                "test-key",
+                http_port=880,
+                verify_ssl=False,
+            ) as client:
+                redirect_url, use_ssl = await client._discover_redirect_url()
+
+                assert redirect_url is None
+                assert use_ssl is False
 
     async def test_discover_fallback_to_https_on_ssl_error(self) -> None:
         """Test discovery falls back to HTTPS on SSL error (doesn't raise)."""
@@ -378,6 +464,73 @@ class TestRedirectDiscovery:
 
                 assert redirect_url is None
                 assert use_ssl is True
+
+    async def test_discover_ssl_error_custom_port_raises(self) -> None:
+        """Test that SSL error on custom port raises instead of fallback."""
+        ssl_error = create_ssl_error()
+
+        with aioresponses() as m:
+            m.get(
+                "http://192.168.1.100:880/graphql",
+                exception=ssl_error,
+            )
+
+            async with UnraidClient(
+                "192.168.1.100",
+                "test-key",
+                http_port=880,
+                verify_ssl=False,
+            ) as client:
+                with pytest.raises(UnraidConnectionError, match="port 880"):
+                    await client._discover_redirect_url()
+
+    async def test_discover_custom_http_and_https_ports_redirect(self) -> None:
+        """Test custom HTTP + HTTPS ports with redirect works end-to-end.
+
+        Simulates Unraid configured with HTTP on 8080 and HTTPS on 8443.
+        The HTTP probe hits 8080, gets a redirect to https://host:8443/...,
+        and the redirect URL is used directly.
+        """
+        with aioresponses() as m:
+            m.get(
+                "http://192.168.1.100:8080/graphql",
+                status=302,
+                headers={"Location": "https://192.168.1.100:8443/graphql"},
+            )
+
+            async with UnraidClient(
+                "192.168.1.100",
+                "test-key",
+                http_port=8080,
+                https_port=8443,
+                verify_ssl=False,
+            ) as client:
+                redirect_url, use_ssl = await client._discover_redirect_url()
+
+                assert redirect_url == "https://192.168.1.100:8443/graphql"
+                assert use_ssl is True
+
+    async def test_discover_custom_http_and_https_ports_unreachable(self) -> None:
+        """Test custom HTTP + HTTPS ports raises when HTTP port is unreachable.
+
+        Simulates wrong ports: HTTP on 8080 is unreachable. Should raise
+        immediately instead of silently falling back to HTTPS on 8443.
+        """
+        with aioresponses() as m:
+            m.get(
+                "http://192.168.1.100:8080/graphql",
+                exception=aiohttp.ClientError("Connection refused"),
+            )
+
+            async with UnraidClient(
+                "192.168.1.100",
+                "test-key",
+                http_port=8080,
+                https_port=8443,
+                verify_ssl=False,
+            ) as client:
+                with pytest.raises(UnraidConnectionError, match="port 8080"):
+                    await client._discover_redirect_url()
 
 
 class TestGraphQLQuery:

@@ -14,6 +14,7 @@ from unraid_api.models import (
     PhysicalDisk,
     Share,
     UnraidArray,
+    _parse_datetime,
 )
 
 
@@ -48,6 +49,12 @@ class TestDatetimeParsing:
         os_info = InfoOs(uptime=dt)
 
         assert os_info.uptime == dt
+
+    def test_parse_unsupported_type_returns_none(self) -> None:
+        """Test that unsupported types return None."""
+        result = _parse_datetime(12345)
+
+        assert result is None
 
 
 class TestArrayCapacity:
