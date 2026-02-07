@@ -65,6 +65,9 @@ venv.bak/
 *.swp
 *.swo
 
+# Serena configuration
+.serena/
+
 # mypy
 .mypy_cache/
 .dmypy.json
