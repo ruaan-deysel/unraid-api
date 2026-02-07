@@ -186,7 +186,7 @@ class TestRedirectDiscovery:
             ) as client:
                 redirect_url, use_ssl = await client._discover_redirect_url()
 
-                assert redirect_url == "https://192.168.1.100:8080"
+                assert redirect_url == "https://192.168.1.100:8080/graphql"
                 assert use_ssl is True
 
     async def test_discover_nginx_400_default_https_port(self) -> None:
@@ -216,7 +216,7 @@ class TestRedirectDiscovery:
             ) as client:
                 redirect_url, use_ssl = await client._discover_redirect_url()
 
-                assert redirect_url == "https://192.168.1.100"
+                assert redirect_url == "https://192.168.1.100/graphql"
                 assert use_ssl is True
 
     async def test_discover_generic_400_is_http(self) -> None:

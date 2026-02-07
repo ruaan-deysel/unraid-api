@@ -247,10 +247,11 @@ class UnraidClient:
                         parsed_probe = urlparse(http_url)
                         hostname = parsed_probe.hostname or clean_host
                         port = parsed_probe.port
+                        path = parsed_probe.path or ""
                         if port == DEFAULT_HTTPS_PORT or port is None:
-                            https_url = f"https://{hostname}"
+                            https_url = f"https://{hostname}{path}"
                         else:
-                            https_url = f"https://{hostname}:{port}"
+                            https_url = f"https://{hostname}:{port}{path}"
                         _LOGGER.info(
                             "HTTP probe got 400 'plain HTTP to HTTPS port' from %s, "
                             "server requires HTTPS at %s",
