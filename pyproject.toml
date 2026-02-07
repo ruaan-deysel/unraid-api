@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "unraid-api"
-version = "1.4.0"
+dynamic = ["version"]
 description = "Python client library for Unraid's official GraphQL API"
 readme = "README.md"
 license = "MIT"
@@ -64,6 +64,10 @@ include = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/unraid_api"]
+
+# Version is read from _version.py - single source of truth
+[tool.hatch.version]
+path = "src/unraid_api/_version.py"
 
 # =============================================================================
 # Ruff Configuration
