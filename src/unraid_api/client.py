@@ -184,8 +184,8 @@ class UnraidClient:
 
         clean_host = self._get_clean_host()
 
-        # Short-circuit: if http_port == https_port, the port is serving HTTPS.
-        # Sending a plain HTTP probe would get a 400 from nginx, so skip it.
+        # Short-circuit: if http_port == https_port, assume this port is configured
+        # to serve HTTPS and skip the plain HTTP probe to avoid a likely 400 from nginx.
         if self.http_port == self.https_port:
             _LOGGER.debug(
                 "http_port == https_port (%d), assuming HTTPS for %s",
