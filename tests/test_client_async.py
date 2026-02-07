@@ -190,7 +190,7 @@ class TestRedirectDiscovery:
                 assert use_ssl is True
 
     async def test_discover_nginx_400_default_https_port(self) -> None:
-        """Test nginx 400 on default port 443 returns URL without port suffix."""
+        """Test nginx 400 on port 443 omits port suffix from HTTPS URL."""
         nginx_body = (
             "<html>\n"
             "<head><title>400 The plain HTTP request was sent to HTTPS port"
@@ -203,7 +203,7 @@ class TestRedirectDiscovery:
         )
         with aioresponses() as m:
             m.get(
-                "http://192.168.1.100/graphql",
+                "http://192.168.1.100:443/graphql",
                 status=400,
                 body=nginx_body,
             )
@@ -211,6 +211,7 @@ class TestRedirectDiscovery:
             async with UnraidClient(
                 "192.168.1.100",
                 "test-key",
+                http_port=443,
                 https_port=8443,
                 verify_ssl=False,
             ) as client:
