@@ -7,23 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.4.2] - 2026-02-07
+## [1.5.0] - 2026-02-07
+
+### Added
+
+- `restart_container(container_id, delay=1.0)` convenience method that encapsulates the stop/wait/start sequence
+- Container log retrieval: `get_container_logs()` and `typed_get_container_logs()` with `tail` and `since` parameters
+- User account query: `get_me()` and `typed_get_me()` for current authenticated user info
+- API key management: `get_api_keys()`, `typed_get_api_keys()`, `create_api_key()`, `update_api_key()`, `delete_api_keys()`
+- New Pydantic models: `UserAccount`, `ApiKey`, `Permission`, `DockerContainerLogs`, `DockerContainerLogLine`
+- Refactored datetime parsing in Pydantic models using `BeforeValidator` with reusable `ParsedDatetime` annotated type
+  - Consolidates repeated `field_validator` logic for cleaner, more maintainable code
 
 ### Fixed
 
 - Silent fallback to default HTTPS port when HTTP probe fails on user-specified port (fixes #9)
   - When a non-default `http_port` is specified and the port is unreachable, `UnraidConnectionError` is now raised instead of silently connecting on port 443
   - Default port (80) behavior is unchanged — HTTPS fallback still works for standard HTTP→HTTPS upgrade
-
-## [1.4.1] - 2026-02-07
-
-### Added
-
-- Refactored datetime parsing in Pydantic models using `BeforeValidator` with reusable `ParsedDatetime` annotated type
-  - Consolidates repeated `field_validator` logic for cleaner, more maintainable code
-
-### Fixed
-
 - Improved SSL/TLS detection with short-circuit logic when `http_port == https_port`
 - Handle nginx 400 "plain HTTP to HTTPS port" error response to detect forced HTTPS configuration
 - Comprehensive test coverage for SSL detection edge cases and session creation failures

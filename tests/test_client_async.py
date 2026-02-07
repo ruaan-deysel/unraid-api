@@ -3781,3 +3781,435 @@ class TestArrayDiskManagementMethods:
                 result = await client.clear_disk_stats("disk:sdb")
 
                 assert "clearStatistics" in result["array"]
+
+
+class TestRestartContainerMethod:
+    """Tests for restart_container convenience method."""
+
+    async def test_restart_container(self) -> None:
+        """Test restart_container calls stop then start."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            # Stop response
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "docker": {
+                            "stop": {
+                                "id": "container:plex",
+                                "state": "EXITED",
+                                "status": "Exited (0)",
+                            }
+                        }
+                    }
+                },
+            )
+            # Start response
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "docker": {
+                            "start": {
+                                "id": "container:plex",
+                                "state": "RUNNING",
+                                "status": "Up 1 second",
+                            }
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.restart_container("container:plex", delay=0.0)
+
+                assert result["docker"]["start"]["state"] == "RUNNING"
+
+    async def test_restart_container_default_delay(self) -> None:
+        """Test that restart_container has a default delay parameter."""
+        import inspect
+
+        sig = inspect.signature(UnraidClient.restart_container)
+        assert sig.parameters["delay"].default == 1.0
+
+
+class TestContainerLogMethods:
+    """Tests for container log retrieval methods."""
+
+    async def test_get_container_logs(self) -> None:
+        """Test getting raw container logs."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "docker": {
+                            "logs": {
+                                "containerId": "container:abc123",
+                                "lines": [
+                                    {
+                                        "timestamp": "2026-01-15T10:30:00Z",
+                                        "message": "Starting...",
+                                    },
+                                    {
+                                        "timestamp": "2026-01-15T10:30:01Z",
+                                        "message": "Ready.",
+                                    },
+                                ],
+                                "cursor": "2026-01-15T10:30:01Z",
+                            }
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_container_logs("container:abc123", tail=10)
+
+                assert result["containerId"] == "container:abc123"
+                assert len(result["lines"]) == 2
+                assert result["lines"][0]["message"] == "Starting..."
+
+    async def test_get_container_logs_with_since(self) -> None:
+        """Test getting container logs with since parameter."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "docker": {
+                            "logs": {
+                                "containerId": "container:abc123",
+                                "lines": [],
+                                "cursor": None,
+                            }
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_container_logs(
+                    "container:abc123", since="2026-01-15T10:30:00Z"
+                )
+
+                assert result["containerId"] == "container:abc123"
+                assert result["lines"] == []
+
+    async def test_typed_get_container_logs(self) -> None:
+        """Test getting typed container logs."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "docker": {
+                            "logs": {
+                                "containerId": "container:abc123",
+                                "lines": [
+                                    {
+                                        "timestamp": "2026-01-15T10:30:00Z",
+                                        "message": "Hello world",
+                                    }
+                                ],
+                                "cursor": "2026-01-15T10:30:00Z",
+                            }
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                logs = await client.typed_get_container_logs("container:abc123", tail=5)
+
+                assert logs.containerId == "container:abc123"
+                assert len(logs.lines) == 1
+                assert logs.lines[0].message == "Hello world"
+                assert logs.cursor == "2026-01-15T10:30:00Z"
+
+
+class TestUserAccountMethods:
+    """Tests for user account methods."""
+
+    async def test_get_me(self) -> None:
+        """Test getting current user info."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "me": {
+                            "id": "user:abc123",
+                            "name": "admin",
+                            "description": "Admin API key",
+                            "roles": ["ADMIN"],
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_me()
+
+                assert result["id"] == "user:abc123"
+                assert result["name"] == "admin"
+                assert result["roles"] == ["ADMIN"]
+
+    async def test_typed_get_me(self) -> None:
+        """Test getting current user as typed model."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "me": {
+                            "id": "user:abc123",
+                            "name": "viewer",
+                            "description": "Viewer key",
+                            "roles": ["VIEWER"],
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                user = await client.typed_get_me()
+
+                assert user.id == "user:abc123"
+                assert user.name == "viewer"
+                assert user.roles == ["VIEWER"]
+
+
+class TestApiKeyManagementMethods:
+    """Tests for API key management methods."""
+
+    async def test_get_api_keys(self) -> None:
+        """Test listing all API keys."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "apiKeys": [
+                            {
+                                "id": "apikey:111",
+                                "name": "Connect",
+                                "description": "Connect key",
+                                "roles": ["CONNECT"],
+                                "createdAt": "2026-01-01T00:00:00Z",
+                            },
+                            {
+                                "id": "apikey:222",
+                                "name": "Admin Key",
+                                "description": None,
+                                "roles": ["ADMIN"],
+                                "createdAt": "2026-01-02T00:00:00Z",
+                            },
+                        ]
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_api_keys()
+
+                assert len(result) == 2
+                assert result[0]["name"] == "Connect"
+                assert result[1]["roles"] == ["ADMIN"]
+
+    async def test_typed_get_api_keys(self) -> None:
+        """Test listing API keys as typed models."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "apiKeys": [
+                            {
+                                "id": "apikey:111",
+                                "name": "My Key",
+                                "description": "Test",
+                                "roles": ["ADMIN"],
+                                "createdAt": "2026-01-01T00:00:00Z",
+                            }
+                        ]
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                keys = await client.typed_get_api_keys()
+
+                assert len(keys) == 1
+                assert keys[0].id == "apikey:111"
+                assert keys[0].name == "My Key"
+                assert keys[0].roles == ["ADMIN"]
+
+    async def test_create_api_key(self) -> None:
+        """Test creating a new API key."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "apiKey": {
+                            "create": {
+                                "id": "apikey:new",
+                                "key": "generated-secret-key-value",
+                                "name": "New Key",
+                                "description": "For my app",
+                                "roles": ["VIEWER"],
+                                "createdAt": "2026-02-07T00:00:00Z",
+                            }
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.create_api_key(
+                    "New Key",
+                    description="For my app",
+                    roles=["VIEWER"],
+                )
+
+                assert result["id"] == "apikey:new"
+                assert result["key"] == "generated-secret-key-value"
+                assert result["name"] == "New Key"
+
+    async def test_create_api_key_minimal(self) -> None:
+        """Test creating an API key with only required fields."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "apiKey": {
+                            "create": {
+                                "id": "apikey:min",
+                                "key": "min-key-value",
+                                "name": "Minimal",
+                                "description": None,
+                                "roles": [],
+                                "createdAt": "2026-02-07T00:00:00Z",
+                            }
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.create_api_key("Minimal")
+
+                assert result["name"] == "Minimal"
+
+    async def test_update_api_key(self) -> None:
+        """Test updating an API key."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "apiKey": {
+                            "update": {
+                                "id": "apikey:123",
+                                "name": "Renamed Key",
+                                "description": "Updated desc",
+                                "roles": ["ADMIN"],
+                            }
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.update_api_key(
+                    "apikey:123",
+                    name="Renamed Key",
+                    description="Updated desc",
+                )
+
+                assert result["id"] == "apikey:123"
+                assert result["name"] == "Renamed Key"
+
+    async def test_update_api_key_no_optional_params(self) -> None:
+        """Test updating an API key with no optional params (id only)."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "apiKey": {
+                            "update": {
+                                "id": "apikey:123",
+                                "name": "Unchanged",
+                                "description": None,
+                                "roles": ["ADMIN"],
+                            }
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.update_api_key("apikey:123")
+
+                assert result["id"] == "apikey:123"
+
+    async def test_delete_api_keys(self) -> None:
+        """Test deleting API keys."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "apiKey": {
+                            "delete": True,
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.delete_api_keys(["apikey:123", "apikey:456"])
+
+                assert result["apiKey"]["delete"] is True

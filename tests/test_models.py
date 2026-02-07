@@ -1213,3 +1213,146 @@ class TestUPSExtendedFields:
 
         assert device.model == "Back-UPS 1500"
         assert device.battery.health == "Good"
+
+
+class TestUserAccountModel:
+    """Tests for UserAccount model."""
+
+    def test_user_account_with_all_fields(self) -> None:
+        """Test UserAccount creation with all fields."""
+        from unraid_api.models import Permission, UserAccount
+
+        user = UserAccount(
+            id="user:abc123",
+            name="admin",
+            description="Admin user",
+            roles=["ADMIN"],
+            permissions=[Permission(resource="docker", actions=["read", "write"])],
+        )
+
+        assert user.id == "user:abc123"
+        assert user.name == "admin"
+        assert user.description == "Admin user"
+        assert user.roles == ["ADMIN"]
+        assert user.permissions is not None
+        assert len(user.permissions) == 1
+        assert user.permissions[0].resource == "docker"
+
+    def test_user_account_with_minimal_fields(self) -> None:
+        """Test UserAccount creation with minimal required fields."""
+        from unraid_api.models import UserAccount
+
+        user = UserAccount(id="user:abc123", name="viewer")
+
+        assert user.id == "user:abc123"
+        assert user.name == "viewer"
+        assert user.description is None
+        assert user.roles == []
+        assert user.permissions is None
+
+
+class TestApiKeyModel:
+    """Tests for ApiKey model."""
+
+    def test_api_key_with_all_fields(self) -> None:
+        """Test ApiKey creation with all fields."""
+        from unraid_api.models import ApiKey
+
+        key = ApiKey(
+            id="apikey:123",
+            key="abc-def-ghi",
+            name="My Key",
+            description="Test key",
+            roles=["ADMIN"],
+            createdAt="2026-01-01T00:00:00Z",
+        )
+
+        assert key.id == "apikey:123"
+        assert key.key == "abc-def-ghi"
+        assert key.name == "My Key"
+        assert key.description == "Test key"
+        assert key.roles == ["ADMIN"]
+        assert key.createdAt == "2026-01-01T00:00:00Z"
+
+    def test_api_key_with_minimal_fields(self) -> None:
+        """Test ApiKey creation with minimal fields."""
+        from unraid_api.models import ApiKey
+
+        key = ApiKey(id="apikey:123", name="Viewer Key")
+
+        assert key.id == "apikey:123"
+        assert key.key is None
+        assert key.name == "Viewer Key"
+        assert key.roles == []
+
+
+class TestDockerContainerLogModels:
+    """Tests for Docker container log models."""
+
+    def test_log_line_creation(self) -> None:
+        """Test DockerContainerLogLine creation."""
+        from unraid_api.models import DockerContainerLogLine
+
+        line = DockerContainerLogLine(
+            timestamp="2026-01-15T10:30:00Z",
+            message="Container started successfully",
+        )
+
+        assert line.timestamp == "2026-01-15T10:30:00Z"
+        assert line.message == "Container started successfully"
+
+    def test_container_logs_with_lines(self) -> None:
+        """Test DockerContainerLogs with log lines."""
+        from unraid_api.models import DockerContainerLogLine, DockerContainerLogs
+
+        logs = DockerContainerLogs(
+            containerId="container:abc123",
+            lines=[
+                DockerContainerLogLine(
+                    timestamp="2026-01-15T10:30:00Z",
+                    message="Starting...",
+                ),
+                DockerContainerLogLine(
+                    timestamp="2026-01-15T10:30:01Z",
+                    message="Ready.",
+                ),
+            ],
+            cursor="2026-01-15T10:30:01Z",
+        )
+
+        assert logs.containerId == "container:abc123"
+        assert len(logs.lines) == 2
+        assert logs.lines[0].message == "Starting..."
+        assert logs.cursor == "2026-01-15T10:30:01Z"
+
+    def test_container_logs_empty(self) -> None:
+        """Test DockerContainerLogs with no lines."""
+        from unraid_api.models import DockerContainerLogs
+
+        logs = DockerContainerLogs()
+
+        assert logs.containerId is None
+        assert logs.lines == []
+        assert logs.cursor is None
+
+
+class TestPermissionModel:
+    """Tests for Permission model."""
+
+    def test_permission_creation(self) -> None:
+        """Test Permission creation."""
+        from unraid_api.models import Permission
+
+        perm = Permission(resource="docker", actions=["read", "write", "execute"])
+
+        assert perm.resource == "docker"
+        assert perm.actions == ["read", "write", "execute"]
+
+    def test_permission_default_actions(self) -> None:
+        """Test Permission creation with default empty actions."""
+        from unraid_api.models import Permission
+
+        perm = Permission(resource="array")
+
+        assert perm.resource == "array"
+        assert perm.actions == []

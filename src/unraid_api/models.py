@@ -1066,3 +1066,96 @@ class RemoteAccess(UnraidBaseModel):
     accessType: str | None = None
     forwardType: str | None = None
     port: int | None = None
+
+
+# =============================================================================
+# User & API Key Models
+# =============================================================================
+
+
+class Permission(UnraidBaseModel):
+    """API key or user permission.
+
+    Attributes:
+        resource: The resource this permission applies to.
+        actions: List of allowed actions on the resource.
+
+    """
+
+    resource: str
+    actions: list[str] = []
+
+
+class UserAccount(UnraidBaseModel):
+    """Unraid user account information.
+
+    Attributes:
+        id: Unique user account ID.
+        name: The name of the user account.
+        description: Description of the user account.
+        roles: List of roles assigned to the user.
+        permissions: Optional list of permissions.
+
+    """
+
+    id: str
+    name: str
+    description: str | None = None
+    roles: list[str] = []
+    permissions: list[Permission] | None = None
+
+
+class ApiKey(UnraidBaseModel):
+    """API key information.
+
+    Attributes:
+        id: Unique API key ID (PrefixedID format).
+        key: The API key value (only returned on create).
+        name: Display name for the API key.
+        description: Optional description.
+        roles: List of roles assigned to this key.
+        createdAt: ISO timestamp of when the key was created.
+        permissions: List of permissions for this key.
+
+    """
+
+    id: str
+    key: str | None = None
+    name: str
+    description: str | None = None
+    roles: list[str] = []
+    createdAt: str | None = None
+    permissions: list[Permission] | None = None
+
+
+# =============================================================================
+# Docker Container Log Models
+# =============================================================================
+
+
+class DockerContainerLogLine(UnraidBaseModel):
+    """A single line from a Docker container log.
+
+    Attributes:
+        timestamp: Timestamp of the log entry.
+        message: Log message content.
+
+    """
+
+    timestamp: str
+    message: str
+
+
+class DockerContainerLogs(UnraidBaseModel):
+    """Docker container log retrieval result.
+
+    Attributes:
+        containerId: The container ID the logs belong to.
+        lines: List of log lines.
+        cursor: Cursor for pagination (DateTime).
+
+    """
+
+    containerId: str | None = None
+    lines: list[DockerContainerLogLine] = []
+    cursor: str | None = None

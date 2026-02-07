@@ -10,6 +10,7 @@ from unraid_api.exceptions import (
     UnraidTimeoutError,
 )
 from unraid_api.models import (
+    ApiKey,
     ApiKeyResponse,
     ArrayCapacity,
     ArrayDisk,
@@ -19,6 +20,8 @@ from unraid_api.models import (
     ContainerHostConfig,
     ContainerPort,
     DockerContainer,
+    DockerContainerLogLine,
+    DockerContainerLogs,
     DockerNetwork,
     DynamicRemoteAccessStatus,
     Flash,
@@ -30,6 +33,7 @@ from unraid_api.models import (
     NotificationOverview,
     Owner,
     ParityCheck,
+    Permission,
     PhysicalDisk,
     Plugin,
     Registration,
@@ -43,11 +47,13 @@ from unraid_api.models import (
     SystemMetrics,
     UnraidArray,
     UPSDevice,
+    UserAccount,
     Vars,
     VmDomain,
 )
 
 __all__ = [
+    "ApiKey",
     "ApiKeyResponse",
     "ArrayCapacity",
     "ArrayDisk",
@@ -57,6 +63,8 @@ __all__ = [
     "ContainerHostConfig",
     "ContainerPort",
     "DockerContainer",
+    "DockerContainerLogLine",
+    "DockerContainerLogs",
     "DockerNetwork",
     "DynamicRemoteAccessStatus",
     "Flash",
@@ -68,6 +76,7 @@ __all__ = [
     "NotificationOverview",
     "Owner",
     "ParityCheck",
+    "Permission",
     "PhysicalDisk",
     "Plugin",
     "Registration",
@@ -87,6 +96,7 @@ __all__ = [
     "UnraidConnectionError",
     "UnraidSSLError",
     "UnraidTimeoutError",
+    "UserAccount",
     "Vars",
     "VmDomain",
     "__version__",
