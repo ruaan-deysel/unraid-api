@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-02-07
+
+### Added
+
+- Refactored datetime parsing in Pydantic models using `BeforeValidator` with reusable `ParsedDatetime` annotated type
+  - Consolidates repeated `field_validator` logic for cleaner, more maintainable code
+
+### Fixed
+
+- Improved SSL/TLS detection with short-circuit logic when `http_port == https_port`
+- Handle nginx 400 "plain HTTP to HTTPS port" error response to detect forced HTTPS configuration
+- Comprehensive test coverage for SSL detection edge cases and session creation failures
+
 ## [1.4.0] - 2026-01-13
 
 ### Added
