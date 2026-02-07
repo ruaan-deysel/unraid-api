@@ -1633,29 +1633,26 @@ class TestEdgeCases:
                 result = await client.query("query { online }")
                 assert result == {"online": True}
 
-    async def test_discover_raises_if_session_creation_fails(self) -> None:
+    async def test_discover_raises_if_session_creation_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test _discover_redirect_url raises if session stays None."""
         client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
 
-        # Patch _create_session to be a no-op so _session stays None
-        async def noop_create() -> None:
-            pass
-
-        client._create_session = noop_create  # type: ignore[assignment]
+        monkeypatch.setattr(client, "_create_session", AsyncMock())
 
         with pytest.raises(
             UnraidConnectionError, match="Failed to create HTTP session"
         ):
             await client._discover_redirect_url()
 
-    async def test_make_request_raises_if_session_creation_fails(self) -> None:
+    async def test_make_request_raises_if_session_creation_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test _make_request raises if session stays None."""
         client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
 
-        async def noop_create() -> None:
-            pass
-
-        client._create_session = noop_create  # type: ignore[assignment]
+        monkeypatch.setattr(client, "_create_session", AsyncMock())
 
         with pytest.raises(
             UnraidConnectionError, match="Failed to create HTTP session"
