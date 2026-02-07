@@ -186,7 +186,37 @@ class TestRedirectDiscovery:
             ) as client:
                 redirect_url, use_ssl = await client._discover_redirect_url()
 
-                assert redirect_url is None
+                assert redirect_url == "https://192.168.1.100:8080"
+                assert use_ssl is True
+
+    async def test_discover_nginx_400_default_https_port(self) -> None:
+        """Test nginx 400 on default port 443 returns URL without port suffix."""
+        nginx_body = (
+            "<html>\n"
+            "<head><title>400 The plain HTTP request was sent to HTTPS port"
+            "</title></head>\n"
+            "<body>\n"
+            "<center><h1>400 Bad Request</h1></center>\n"
+            "<center>The plain HTTP request was sent to HTTPS port</center>\n"
+            "</body>\n"
+            "</html>\n"
+        )
+        with aioresponses() as m:
+            m.get(
+                "http://192.168.1.100/graphql",
+                status=400,
+                body=nginx_body,
+            )
+
+            async with UnraidClient(
+                "192.168.1.100",
+                "test-key",
+                https_port=8443,
+                verify_ssl=False,
+            ) as client:
+                redirect_url, use_ssl = await client._discover_redirect_url()
+
+                assert redirect_url == "https://192.168.1.100"
                 assert use_ssl is True
 
     async def test_discover_generic_400_is_http(self) -> None:

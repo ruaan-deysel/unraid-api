@@ -244,12 +244,20 @@ class UnraidClient:
                 if response.status == 400:
                     body = await response.text()
                     if "the plain http request was sent to https port" in body.lower():
+                        parsed_probe = urlparse(http_url)
+                        hostname = parsed_probe.hostname or clean_host
+                        port = parsed_probe.port
+                        if port == DEFAULT_HTTPS_PORT or port is None:
+                            https_url = f"https://{hostname}"
+                        else:
+                            https_url = f"https://{hostname}:{port}"
                         _LOGGER.info(
                             "HTTP probe got 400 'plain HTTP to HTTPS port' from %s, "
-                            "server requires HTTPS",
+                            "server requires HTTPS at %s",
                             clean_host,
+                            https_url,
                         )
-                        return (None, True)
+                        return (https_url, True)
 
                 # HTTP endpoint is accessible (SSL/TLS mode is "No")
                 _LOGGER.info(
