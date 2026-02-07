@@ -21,9 +21,11 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from unraid_api.models import (
+        ApiKey,
         Cloud,
         Connect,
         DockerContainer,
+        DockerContainerLogs,
         DockerNetwork,
         Flash,
         LogFile,
@@ -38,6 +40,7 @@ if TYPE_CHECKING:
         SystemMetrics,
         UnraidArray,
         UPSDevice,
+        UserAccount,
         Vars,
         VmDomain,
     )
@@ -2318,3 +2321,279 @@ class UnraidClient:
             }
         """
         return await self.mutate(mutation, {"id": disk_id})
+
+    # =========================================================================
+    # Container Convenience Methods
+    # =========================================================================
+
+    async def restart_container(
+        self, container_id: str, *, delay: float = 1.0
+    ) -> dict[str, Any]:
+        """Restart a Docker container (stop → wait → start).
+
+        The Unraid GraphQL API does not have a native restart mutation,
+        so this convenience method encapsulates the stop/wait/start sequence.
+
+        Args:
+            container_id: Container ID to restart.
+            delay: Seconds to wait between stop and start (default 1.0).
+
+        Returns:
+            Start mutation response data.
+
+        Raises:
+            UnraidConnectionError: On network errors.
+            UnraidAPIError: On GraphQL errors.
+
+        """
+        import asyncio
+
+        await self.stop_container(container_id)
+        await asyncio.sleep(delay)
+        return await self.start_container(container_id)
+
+    # =========================================================================
+    # Container Log Methods
+    # =========================================================================
+
+    async def get_container_logs(
+        self,
+        container_id: str,
+        *,
+        tail: int | None = None,
+        since: str | None = None,
+    ) -> dict[str, Any]:
+        """Get logs for a Docker container.
+
+        Args:
+            container_id: Container ID to get logs for.
+            tail: Number of most recent log lines to return.
+            since: DateTime string to get logs since (ISO 8601 format).
+
+        Returns:
+            Raw log data with containerId, lines, and cursor.
+
+        """
+        query = """
+            query GetContainerLogs(
+                $id: PrefixedID!,
+                $tail: Int,
+                $since: DateTime
+            ) {
+                docker {
+                    logs(id: $id, tail: $tail, since: $since) {
+                        containerId
+                        lines {
+                            timestamp
+                            message
+                        }
+                        cursor
+                    }
+                }
+            }
+        """
+        variables: dict[str, Any] = {"id": container_id}
+        if tail is not None:
+            variables["tail"] = tail
+        if since is not None:
+            variables["since"] = since
+        result = await self.query(query, variables)
+        logs: dict[str, Any] = dict(result.get("docker", {}).get("logs", {}))
+        return logs
+
+    async def typed_get_container_logs(
+        self,
+        container_id: str,
+        *,
+        tail: int | None = None,
+        since: str | None = None,
+    ) -> DockerContainerLogs:
+        """Get logs for a Docker container as a typed model.
+
+        Args:
+            container_id: Container ID to get logs for.
+            tail: Number of most recent log lines to return.
+            since: DateTime string to get logs since (ISO 8601 format).
+
+        Returns:
+            DockerContainerLogs model with log lines.
+
+        """
+        from unraid_api.models import DockerContainerLogs
+
+        data = await self.get_container_logs(container_id, tail=tail, since=since)
+        return DockerContainerLogs.model_validate(data)
+
+    # =========================================================================
+    # User Account Methods
+    # =========================================================================
+
+    async def get_me(self) -> dict[str, Any]:
+        """Get the current authenticated user's account info.
+
+        Returns:
+            Dict with id, name, description, and roles.
+
+        """
+        query = """
+            query {
+                me {
+                    id
+                    name
+                    description
+                    roles
+                }
+            }
+        """
+        result = await self.query(query)
+        me: dict[str, Any] = dict(result.get("me", {}))
+        return me
+
+    async def typed_get_me(self) -> UserAccount:
+        """Get the current authenticated user as a typed model.
+
+        Returns:
+            UserAccount model.
+
+        """
+        from unraid_api.models import UserAccount
+
+        data = await self.get_me()
+        return UserAccount.model_validate(data)
+
+    # =========================================================================
+    # API Key Management Methods
+    # =========================================================================
+
+    async def get_api_keys(self) -> list[dict[str, Any]]:
+        """Get all API keys.
+
+        Returns:
+            List of API key dicts with id, name, description, roles, createdAt.
+
+        """
+        query = """
+            query {
+                apiKeys {
+                    id
+                    name
+                    description
+                    roles
+                    createdAt
+                }
+            }
+        """
+        result = await self.query(query)
+        keys: list[dict[str, Any]] = list(result.get("apiKeys", []))
+        return keys
+
+    async def typed_get_api_keys(self) -> list[ApiKey]:
+        """Get all API keys as typed models.
+
+        Returns:
+            List of ApiKey models.
+
+        """
+        from unraid_api.models import ApiKey
+
+        data = await self.get_api_keys()
+        return [ApiKey.model_validate(item) for item in data]
+
+    async def create_api_key(
+        self,
+        name: str,
+        *,
+        description: str | None = None,
+        roles: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Create a new API key.
+
+        Args:
+            name: Display name for the key.
+            description: Optional description.
+            roles: List of roles (e.g., ["ADMIN"], ["VIEWER"]).
+
+        Returns:
+            Created API key data including the key value.
+
+        """
+        mutation = """
+            mutation CreateApiKey($input: ApiKeyCreateInput!) {
+                apiKey {
+                    create(input: $input) {
+                        id
+                        key
+                        name
+                        description
+                        roles
+                        createdAt
+                    }
+                }
+            }
+        """
+        input_data: dict[str, Any] = {"name": name}
+        if description is not None:
+            input_data["description"] = description
+        if roles is not None:
+            input_data["roles"] = roles
+        result = await self.mutate(mutation, {"input": input_data})
+        created: dict[str, Any] = dict(result.get("apiKey", {}).get("create", {}))
+        return created
+
+    async def update_api_key(
+        self,
+        key_id: str,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> dict[str, Any]:
+        """Update an existing API key.
+
+        Args:
+            key_id: API key ID to update.
+            name: New display name.
+            description: New description.
+
+        Returns:
+            Updated API key data.
+
+        """
+        mutation = """
+            mutation UpdateApiKey($input: ApiKeyUpdateInput!) {
+                apiKey {
+                    update(input: $input) {
+                        id
+                        name
+                        description
+                        roles
+                    }
+                }
+            }
+        """
+        input_data: dict[str, Any] = {"id": key_id}
+        if name is not None:
+            input_data["name"] = name
+        if description is not None:
+            input_data["description"] = description
+        result = await self.mutate(mutation, {"input": input_data})
+        updated: dict[str, Any] = dict(result.get("apiKey", {}).get("update", {}))
+        return updated
+
+    async def delete_api_keys(self, key_ids: list[str]) -> dict[str, Any]:
+        """Delete one or more API keys.
+
+        Args:
+            key_ids: List of API key IDs to delete.
+
+        Returns:
+            Mutation response data.
+
+        """
+        mutation = """
+            mutation DeleteApiKeys($input: ApiKeyDeleteInput!) {
+                apiKey {
+                    delete(input: $input)
+                }
+            }
+        """
+        return await self.mutate(mutation, {"input": {"ids": key_ids}})
