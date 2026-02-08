@@ -327,9 +327,8 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 Contributions welcome! Please ensure:
 1. Tests are written first (TDD)
-2. All tests pass with 80%+ coverage
-3. No linting errors (`ruff check . && mypy src/`)
-4. GraphQL variables used (no string interpolation)
+2. No linting errors (`ruff check . && mypy src/`)
+3. GraphQL variables used (no string interpolation)
 
 ## Links
 
