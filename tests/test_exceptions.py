@@ -8,6 +8,7 @@ from unraid_api.exceptions import (
     UnraidConnectionError,
     UnraidSSLError,
     UnraidTimeoutError,
+    UnraidVersionError,
 )
 
 
@@ -183,4 +184,23 @@ class TestExceptionHierarchy:
         error = UnraidSSLError()
 
         assert isinstance(error, UnraidConnectionError)
+        assert isinstance(error, UnraidAPIError)
+
+
+class TestUnraidVersionError:
+    """Tests for UnraidVersionError."""
+
+    def test_default_message(self) -> None:
+        """Test default error message."""
+        error = UnraidVersionError()
+        assert str(error) == "Incompatible server version"
+
+    def test_custom_message(self) -> None:
+        """Test custom error message."""
+        error = UnraidVersionError("API version 4.0.0 is too old")
+        assert str(error) == "API version 4.0.0 is too old"
+
+    def test_is_unraid_api_error(self) -> None:
+        """Test that it's a subclass of UnraidAPIError."""
+        error = UnraidVersionError()
         assert isinstance(error, UnraidAPIError)

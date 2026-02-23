@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-02-24
+
+### Added
+
+- **State constants module** (`unraid_api.const`) with all known API state values organized by domain (fixes #17)
+  - `MIN_API_VERSION`, `MIN_UNRAID_VERSION` for version gating
+  - Docker, VM, disk, parity, UPS, and array state constants
+- **State helper properties** on models (fixes #17):
+  - `DockerContainer.is_running` - True when container state is "running"
+  - `VmDomain.is_running` - True when VM state is "running" or "idle"
+  - `ArrayDisk.is_healthy` - True when disk status is "DISK_OK"
+  - `ParityCheck.is_running` - True when status is "RUNNING" or "PAUSED"
+  - `ParityCheck.has_problem` - True when status is "FAILED" or errors > 0
+  - `UPSDevice.is_connected` - True when status is not "Offline" or "OFF"
+- **`VersionInfo` model** returned by `get_version()` with typed `api` and `unraid` fields (fixes #21)
+- **`ParityHistoryEntry` model** returned by `get_parity_history()` with typed fields and `duration_formatted` property (fixes #18)
+  - Handles multiple date formats (ISO strings, epoch timestamps, datetime objects)
+- **`check_compatibility()` method** on `UnraidClient` for version validation (fixes #20)
+  - Raises `UnraidVersionError` if server version is below minimum requirements
+  - Uses `packaging` library for robust semantic version comparison
+- **`UnraidVersionError` exception** for incompatible server versions (fixes #20)
+- **`format_bytes()` utility function** for human-readable byte formatting (fixes #15)
+- **`SystemMetrics.average_cpu_temperature`** property - mean of all CPU package temps (fixes #15)
+- **`SystemMetrics.memory_used` fallback** computation from `total - available` when API doesn't provide `used` (fixes #15)
+- **UPS power calculation helper** `UPSDevice.calculate_power_watts(nominal_power)` (fixes #19)
+- **`UPSBattery.runtime_formatted`** property for human-readable runtime display (fixes #19)
+- Missing fields in `typed_get_containers()` GraphQL query: `imageId`, `isUpdateAvailable`, `webUiUrl`, `iconUrl` (fixes #12)
+  - Extended fields (`isUpdateAvailable`, `webUiUrl`, `iconUrl`) are queried with automatic fallback for older API versions that don't support them (verified against official schema at `unraid/api`)
+- `packaging` as a runtime dependency for version comparison
+
+### Fixed
+
+- **ZFS disk usage calculation** - `ArrayDisk.fs_used_bytes` and `usage_percent` now fall back to `fsSize - fsFree` when `fsUsed` is 0 or None, which is common on ZFS pools (fixes #16)
+- **aiohttp exception wrapping** - all aiohttp exceptions are now properly mapped to the UnraidAPI exception hierarchy (fixes #22):
+  - `ClientResponseError` (401/403) -> `UnraidAuthenticationError`
+  - `ClientResponseError` (other) -> `UnraidAPIError`
+  - `TimeoutError` during discovery -> `UnraidTimeoutError`
+  - Session `close()` errors are now suppressed and logged
+- Consumers no longer need to import `aiohttp` to handle errors
+
+### Changed
+
+- `get_version()` now returns `VersionInfo` model instead of `dict[str, str]`
+- `get_parity_history()` now returns `list[ParityHistoryEntry]` instead of `list[dict]`
+
 ## [1.5.0] - 2026-02-07
 
 ### Added
@@ -157,7 +202,10 @@ Return dict/list for flexible access:
 - `PhysicalDisk`
 - `Notification`, `NotificationOverview`
 
-[Unreleased]: https://github.com/ruaan-deysel/unraid-api/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/ruaan-deysel/unraid-api/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/ruaan-deysel/unraid-api/compare/v1.5.0...v1.6.0
+[1.5.0]: https://github.com/ruaan-deysel/unraid-api/compare/v1.4.0...v1.5.0
+[1.4.0]: https://github.com/ruaan-deysel/unraid-api/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/ruaan-deysel/unraid-api/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/ruaan-deysel/unraid-api/compare/v1.2.2...v1.3.0
 [1.2.2]: https://github.com/ruaan-deysel/unraid-api/releases/tag/v1.2.2

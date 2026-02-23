@@ -31,6 +31,7 @@ if TYPE_CHECKING:
         LogFile,
         NotificationOverview,
         Owner,
+        ParityHistoryEntry,
         Plugin,
         Registration,
         RemoteAccess,
@@ -42,6 +43,7 @@ if TYPE_CHECKING:
         UPSDevice,
         UserAccount,
         Vars,
+        VersionInfo,
         VmDomain,
     )
 
@@ -153,7 +155,10 @@ class UnraidClient:
     async def close(self) -> None:
         """Close the aiohttp session if we created it."""
         if self._session is not None and self._owns_session:
-            await self._session.close()
+            try:
+                await self._session.close()
+            except Exception:
+                _LOGGER.debug("Error closing session", exc_info=True)
             self._session = None
 
     def _get_clean_host(self) -> str:
@@ -267,6 +272,14 @@ class UnraidClient:
                 )
                 return (None, False)
 
+        except TimeoutError as err:
+            if self.http_port != DEFAULT_HTTP_PORT:
+                msg = (
+                    f"Timeout connecting to {clean_host}"
+                    f" on port {self.http_port}: {err}"
+                )
+                raise UnraidTimeoutError(msg) from err
+            _LOGGER.debug("HTTP check timed out, will try HTTPS: %s", err)
         except aiohttp.ClientError as err:
             # When the user specified a custom (non-default) HTTP port and
             # that port is unreachable, raise immediately — don't silently
@@ -358,10 +371,18 @@ class UnraidClient:
                 json_result: dict[str, Any] = await response.json()
                 return json_result
 
+        except UnraidAuthenticationError:
+            raise
         except TimeoutError as err:
             raise UnraidTimeoutError(f"Request timed out: {err}") from err
         except aiohttp.ClientSSLError as err:
             raise UnraidSSLError(f"SSL certificate verification failed: {err}") from err
+        except aiohttp.ClientResponseError as err:
+            if err.status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                raise UnraidAuthenticationError(
+                    f"Authentication failed (HTTP {err.status}): {err.message}"
+                ) from err
+            raise UnraidAPIError(f"HTTP error {err.status}: {err.message}") from err
         except aiohttp.ClientError as err:
             raise UnraidConnectionError(f"Connection failed: {err}") from err
 
@@ -461,13 +482,54 @@ class UnraidClient:
         result = await self.query("query { online }")
         return bool(result.get("online", False))
 
-    async def get_version(self) -> dict[str, str]:
+    async def check_compatibility(self) -> VersionInfo:
+        """Check server version compatibility.
+
+        Fetches the server version and verifies it meets minimum requirements.
+
+        Returns:
+            VersionInfo model with version details.
+
+        Raises:
+            UnraidVersionError: If the server version is below minimum requirements.
+
+        """
+        from packaging.version import InvalidVersion, Version
+
+        from unraid_api.const import MIN_API_VERSION, MIN_UNRAID_VERSION
+        from unraid_api.exceptions import UnraidVersionError
+
+        version_info = await self.get_version()
+
+        try:
+            if Version(version_info.api) < Version(MIN_API_VERSION):
+                raise UnraidVersionError(
+                    f"API version {version_info.api} is below minimum "
+                    f"required version {MIN_API_VERSION}"
+                )
+        except InvalidVersion:
+            _LOGGER.warning("Could not parse API version: %s", version_info.api)
+
+        try:
+            if Version(version_info.unraid) < Version(MIN_UNRAID_VERSION):
+                raise UnraidVersionError(
+                    f"Unraid version {version_info.unraid} is below minimum "
+                    f"required version {MIN_UNRAID_VERSION}"
+                )
+        except InvalidVersion:
+            _LOGGER.warning("Could not parse Unraid version: %s", version_info.unraid)
+
+        return version_info
+
+    async def get_version(self) -> VersionInfo:
         """Get Unraid server version information.
 
         Returns:
-            Dictionary with 'unraid' and 'api' version strings.
+            VersionInfo model with 'unraid' and 'api' version strings.
 
         """
+        from unraid_api.models import VersionInfo
+
         query_str = """
             query {
                 info {
@@ -482,10 +544,10 @@ class UnraidClient:
         """
         result = await self.query(query_str)
         versions = result.get("info", {}).get("versions", {}).get("core", {})
-        return {
-            "unraid": versions.get("unraid", "unknown"),
-            "api": versions.get("api", "unknown"),
-        }
+        return VersionInfo(
+            unraid=versions.get("unraid") or "unknown",
+            api=versions.get("api") or "unknown",
+        )
 
     async def get_server_info(self) -> ServerInfo:
         """Get server information for device registration.
@@ -548,19 +610,43 @@ class UnraidClient:
     async def typed_get_containers(self) -> list[DockerContainer]:
         """Get all Docker containers as Pydantic models.
 
+        Attempts to query extended fields (isUpdateAvailable, webUiUrl,
+        iconUrl) first. Falls back to core fields if the server's API
+        version does not support them.
+
         Returns:
             List of DockerContainer models.
 
         """
         from unraid_api.models import DockerContainer
 
-        query_str = """
+        extended_query = """
             query {
                 docker {
                     containers {
                         id
                         names
                         image
+                        imageId
+                        state
+                        status
+                        autoStart
+                        isUpdateAvailable
+                        webUiUrl
+                        iconUrl
+                        ports { ip privatePort publicPort type }
+                    }
+                }
+            }
+        """
+        core_query = """
+            query {
+                docker {
+                    containers {
+                        id
+                        names
+                        image
+                        imageId
                         state
                         status
                         autoStart
@@ -569,7 +655,15 @@ class UnraidClient:
                 }
             }
         """
-        result = await self.query(query_str)
+        try:
+            result = await self.query(extended_query)
+        except UnraidAPIError as exc:
+            if isinstance(
+                exc,
+                UnraidAuthenticationError | UnraidConnectionError | UnraidTimeoutError,
+            ):
+                raise
+            result = await self.query(core_query)
         containers = result.get("docker", {}).get("containers", []) or []
         return [DockerContainer.from_api_response(c) for c in containers]
 
@@ -1607,13 +1701,15 @@ class UnraidClient:
     # Parity History Methods
     # =========================================================================
 
-    async def get_parity_history(self) -> list[dict[str, Any]]:
-        """Get parity check history.
+    async def get_parity_history(self) -> list[ParityHistoryEntry]:
+        """Get parity check history as typed models.
 
         Returns:
-            List of parity check history entries.
+            List of ParityHistoryEntry models.
 
         """
+        from unraid_api.models import ParityHistoryEntry
+
         query_str = """
             query {
                 parityHistory {
@@ -1626,7 +1722,8 @@ class UnraidClient:
             }
         """
         result = await self.query(query_str)
-        return list(result.get("parityHistory", []))
+        entries = result.get("parityHistory", []) or []
+        return [ParityHistoryEntry.model_validate(e) for e in entries]
 
     # =========================================================================
     # Registration Methods

@@ -803,7 +803,8 @@ class TestConnectionMethods:
             ) as client:
                 result = await client.get_version()
 
-                assert result == {"unraid": "7.2.0", "api": "4.21.0"}
+                assert result.unraid == "7.2.0"
+                assert result.api == "4.21.0"
 
 
 class TestContainerMethods:
@@ -2033,8 +2034,8 @@ class TestParityHistoryMethod:
                 result = await client.get_parity_history()
 
                 assert len(result) == 2
-                assert result[0]["status"] == "COMPLETED"
-                assert result[0]["errors"] == 0
+                assert result[0].status == "COMPLETED"
+                assert result[0].errors == 0
 
 
 class TestGetServerInfoMethod:
@@ -2381,6 +2382,103 @@ class TestTypedGetContainersMethod:
 
                 assert isinstance(result, list)
                 assert len(result) == 0
+
+    async def test_typed_get_containers_fallback_on_unsupported_fields(self) -> None:
+        """Test fallback to core query when extended fields are unsupported."""
+        from unraid_api.models import DockerContainer
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            # First POST (extended query) returns 400
+            m.post("http://192.168.1.100/graphql", status=400)
+            # Second POST (core fallback query) succeeds
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "docker": {
+                            "containers": [
+                                {
+                                    "id": "container:abc123",
+                                    "names": ["/plex"],
+                                    "image": "plexinc/pms-docker",
+                                    "state": "running",
+                                    "status": "Up 5 days",
+                                    "autoStart": True,
+                                    "ports": [],
+                                },
+                            ]
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.typed_get_containers()
+
+                assert len(result) == 1
+                assert isinstance(result[0], DockerContainer)
+                assert result[0].name == "plex"
+                # Extended fields should be None in fallback
+                assert result[0].isUpdateAvailable is None
+                assert result[0].webUiUrl is None
+                assert result[0].iconUrl is None
+
+    async def test_typed_get_containers_with_extended_fields(self) -> None:
+        """Test extended fields are populated when server supports them."""
+        from unraid_api.models import DockerContainer
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "docker": {
+                            "containers": [
+                                {
+                                    "id": "container:abc123",
+                                    "names": ["/plex"],
+                                    "image": "plexinc/pms-docker",
+                                    "state": "running",
+                                    "status": "Up 5 days",
+                                    "autoStart": True,
+                                    "isUpdateAvailable": True,
+                                    "webUiUrl": "http://192.168.1.100:32400",
+                                    "iconUrl": "/icons/plex.png",
+                                    "ports": [],
+                                },
+                            ]
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.typed_get_containers()
+
+                assert len(result) == 1
+                assert isinstance(result[0], DockerContainer)
+                assert result[0].isUpdateAvailable is True
+                assert result[0].webUiUrl == "http://192.168.1.100:32400"
+                assert result[0].iconUrl == "/icons/plex.png"
+
+    async def test_typed_get_containers_auth_error_not_swallowed(self) -> None:
+        """Test that auth errors are re-raised, not caught by fallback."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            # Extended query returns 401 (auth error)
+            m.post("http://192.168.1.100/graphql", status=401)
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                with pytest.raises(UnraidAuthenticationError):
+                    await client.typed_get_containers()
 
 
 class TestTypedGetVmsMethod:
@@ -4213,3 +4311,182 @@ class TestApiKeyManagementMethods:
                 result = await client.delete_api_keys(["apikey:123", "apikey:456"])
 
                 assert result["apiKey"]["delete"] is True
+
+
+class TestCloseExceptionHandling:
+    """Tests for exception handling in close()."""
+
+    async def test_close_suppresses_exceptions(self) -> None:
+        """Test that close() suppresses exceptions from session.close()."""
+        mock_session = MagicMock(spec=aiohttp.ClientSession)
+        mock_session.close = AsyncMock(side_effect=Exception("cleanup error"))
+
+        client = UnraidClient("192.168.1.100", "test-key")
+        client._session = mock_session
+        client._owns_session = True
+
+        # Should not raise
+        await client.close()
+        assert client._session is None
+
+
+class TestMakeRequestExceptionWrapping:
+    """Tests for exception wrapping in _make_request."""
+
+    async def test_client_response_error_401_wrapped(self) -> None:
+        """Test that ClientResponseError 401 becomes UnraidAuthenticationError."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                exception=aiohttp.ClientResponseError(
+                    request_info=MagicMock(),
+                    history=(),
+                    status=401,
+                    message="Unauthorized",
+                ),
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                with pytest.raises(UnraidAuthenticationError):
+                    await client.query("query { online }")
+
+    async def test_client_response_error_500_wrapped(self) -> None:
+        """Test that ClientResponseError 500 becomes UnraidAPIError."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                exception=aiohttp.ClientResponseError(
+                    request_info=MagicMock(),
+                    history=(),
+                    status=500,
+                    message="Internal Server Error",
+                ),
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                with pytest.raises(UnraidAPIError, match="HTTP error 500"):
+                    await client.query("query { online }")
+
+
+class TestDiscoverTimeoutCustomPort:
+    """Tests for timeout during discovery with custom port."""
+
+    async def test_timeout_custom_port_raises(self) -> None:
+        """Test that timeout on custom port raises UnraidTimeoutError."""
+        with aioresponses() as m:
+            m.get(
+                "http://192.168.1.100:880/graphql",
+                exception=TimeoutError("Connection timed out"),
+            )
+
+            async with UnraidClient(
+                "192.168.1.100",
+                "test-key",
+                http_port=880,
+                verify_ssl=False,
+            ) as client:
+                with pytest.raises(UnraidTimeoutError, match="port 880"):
+                    await client._discover_redirect_url()
+
+
+class TestCheckCompatibility:
+    """Tests for version compatibility checking."""
+
+    async def test_compatible_versions(self) -> None:
+        """Test check_compatibility with compatible versions."""
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "info": {
+                            "versions": {"core": {"unraid": "7.2.3", "api": "4.29.2"}}
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.check_compatibility()
+                assert result.unraid == "7.2.3"
+                assert result.api == "4.29.2"
+
+    async def test_incompatible_api_version(self) -> None:
+        """Test check_compatibility raises for old API version."""
+        from unraid_api.exceptions import UnraidVersionError
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "info": {
+                            "versions": {"core": {"unraid": "7.2.3", "api": "3.0.0"}}
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                with pytest.raises(UnraidVersionError, match="API version"):
+                    await client.check_compatibility()
+
+    async def test_incompatible_unraid_version(self) -> None:
+        """Test check_compatibility raises for old Unraid version."""
+        from unraid_api.exceptions import UnraidVersionError
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "info": {
+                            "versions": {"core": {"unraid": "6.0.0", "api": "4.29.2"}}
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                with pytest.raises(UnraidVersionError, match="Unraid version"):
+                    await client.check_compatibility()
+
+    async def test_unknown_version_no_raise(self) -> None:
+        """Test check_compatibility doesn't raise for unparseable versions."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "info": {
+                            "versions": {
+                                "core": {"unraid": "unknown", "api": "unknown"}
+                            }
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                # Should not raise - just warns about unparseable versions
+                result = await client.check_compatibility()
+                assert result.unraid == "unknown"
