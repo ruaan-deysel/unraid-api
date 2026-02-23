@@ -102,3 +102,20 @@ class UnraidTimeoutError(UnraidAPIError):
 
         """
         super().__init__(message)
+
+
+class UnraidVersionError(UnraidAPIError):
+    """Exception raised when the server version is incompatible.
+
+    This exception is raised when the Unraid server or API version
+    does not meet the minimum requirements for this library.
+    """
+
+    def __init__(self, message: str = "Incompatible server version") -> None:
+        """Initialize the exception.
+
+        Args:
+            message: Human-readable error message.
+
+        """
+        super().__init__(message)

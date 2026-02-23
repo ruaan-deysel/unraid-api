@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import datetime
 from typing import Annotated, Any
 
@@ -33,6 +34,56 @@ def _parse_datetime(value: str | datetime | None) -> datetime | None:
 # Use this instead of repeating @field_validator("field", mode="before") on
 # every datetime field.
 ParsedDatetime = Annotated[datetime | None, BeforeValidator(_parse_datetime)]
+
+
+def format_bytes(bytes_value: int | None) -> str | None:
+    """Convert bytes to human-readable string.
+
+    Args:
+        bytes_value: Number of bytes, or None.
+
+    Returns:
+        Human-readable string (e.g., "1.5 GB") or None if input is None.
+
+    """
+    if bytes_value is None:
+        return None
+    if bytes_value == 0:
+        return "0 B"
+
+    units = ("B", "KB", "MB", "GB", "TB", "PB")
+    exponent = min(int(math.log2(abs(bytes_value)) // 10), len(units) - 1)
+    value = bytes_value / (1024**exponent)
+
+    if value == int(value):
+        return f"{int(value)} {units[exponent]}"
+    return f"{value:.1f} {units[exponent]}"
+
+
+def _format_duration(seconds: int) -> str:
+    """Format seconds into a human-readable duration string.
+
+    Args:
+        seconds: Duration in seconds.
+
+    Returns:
+        Human-readable string like "2 hours 15 minutes 30 seconds".
+
+    """
+    seconds = max(seconds, 0)
+
+    hours, remainder = divmod(seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+
+    parts = []
+    if hours:
+        parts.append(f"{hours} {'hour' if hours == 1 else 'hours'}")
+    if minutes:
+        parts.append(f"{minutes} {'minute' if minutes == 1 else 'minutes'}")
+    if secs or not parts:
+        parts.append(f"{secs} {'second' if secs == 1 else 'seconds'}")
+
+    return " ".join(parts)
 
 
 class UnraidBaseModel(BaseModel):
@@ -188,6 +239,20 @@ class ParityCheck(UnraidBaseModel):
     elapsed: int | None = None  # Elapsed time in seconds
     estimated: int | None = None  # Estimated time remaining
 
+    @property
+    def is_running(self) -> bool:
+        """Return True if the parity check is actively running or paused."""
+        if self.status is None:
+            return False
+        return self.status.upper() in {"RUNNING", "PAUSED"}
+
+    @property
+    def has_problem(self) -> bool:
+        """Return True if there are errors or the check has failed."""
+        if self.status is not None and self.status.upper() == "FAILED":
+            return True
+        return bool(self.errors is not None and self.errors > 0)
+
 
 class ArrayDisk(UnraidBaseModel):
     """Array disk information.
@@ -199,6 +264,8 @@ class ArrayDisk(UnraidBaseModel):
         - temp will be null/0 for disks in standby mode
         - isSpinning indicates if disk is active (True) or standby (False)
         - This is safe for Home Assistant integrations that poll frequently
+        - On ZFS pools, fsUsed may be 0 or None; properties fall back to
+          computing used space from fsSize - fsFree when available.
 
     """
 
@@ -223,6 +290,13 @@ class ArrayDisk(UnraidBaseModel):
         return self.isSpinning is False
 
     @property
+    def is_healthy(self) -> bool:
+        """Return True if disk status indicates normal operation."""
+        if self.status is None:
+            return False
+        return self.status.upper() == "DISK_OK"
+
+    @property
     def size_bytes(self) -> int | None:
         """Return disk size in bytes."""
         return self.size * 1024 if self.size is not None else None
@@ -234,8 +308,23 @@ class ArrayDisk(UnraidBaseModel):
 
     @property
     def fs_used_bytes(self) -> int | None:
-        """Return filesystem used space in bytes."""
-        return self.fsUsed * 1024 if self.fsUsed is not None else None
+        """Return filesystem used space in bytes.
+
+        Falls back to (fsSize - fsFree) when fsUsed is 0 or None,
+        which is common on ZFS pools where the API reports fsUsed=0.
+        """
+        # If fsUsed is positive, use it directly
+        if self.fsUsed is not None and self.fsUsed > 0:
+            return self.fsUsed * 1024
+        # Fallback: compute from fsSize - fsFree (ZFS workaround)
+        if self.fsSize is not None and self.fsFree is not None:
+            computed = self.fsSize - self.fsFree
+            if computed >= 0:
+                return computed * 1024
+        # If fsUsed is explicitly 0 (not None), preserve that
+        if self.fsUsed is not None:
+            return self.fsUsed * 1024
+        return None
 
     @property
     def fs_free_bytes(self) -> int | None:
@@ -244,10 +333,25 @@ class ArrayDisk(UnraidBaseModel):
 
     @property
     def usage_percent(self) -> float | None:
-        """Return disk usage percentage."""
-        if self.fsSize is None or self.fsSize == 0 or self.fsUsed is None:
+        """Return disk usage percentage.
+
+        Falls back to computing from fsSize and fsFree when fsUsed is
+        0 or None (ZFS pool workaround).
+        """
+        if self.fsSize is None or self.fsSize == 0:
             return None
-        return (self.fsUsed / self.fsSize) * 100
+
+        # Use fsUsed directly if positive
+        if self.fsUsed is not None and self.fsUsed > 0:
+            return (self.fsUsed / self.fsSize) * 100
+
+        # Fallback: compute from fsSize - fsFree
+        if self.fsFree is not None:
+            computed_used = self.fsSize - self.fsFree
+            if computed_used >= 0:
+                return (computed_used / self.fsSize) * 100
+
+        return None
 
 
 class UnraidArray(UnraidBaseModel):
@@ -347,6 +451,13 @@ class DockerContainer(UnraidBaseModel):
     ports: list[ContainerPort] = []
     stats: DockerContainerStats | None = None
 
+    @property
+    def is_running(self) -> bool:
+        """Return True if the container is running."""
+        if self.state is None:
+            return False
+        return self.state.lower() == "running"
+
     @classmethod
     def from_api_response(cls, data: dict[str, Any]) -> DockerContainer:
         """Create DockerContainer from API response.
@@ -426,6 +537,13 @@ class VmDomain(UnraidBaseModel):
     iconUrl: str | None = None
     primaryGpu: str | None = None
 
+    @property
+    def is_running(self) -> bool:
+        """Return True if the VM is running or idle."""
+        if self.state is None:
+            return False
+        return self.state.lower() in {"running", "idle"}
+
 
 # =============================================================================
 # UPS Models
@@ -438,6 +556,18 @@ class UPSBattery(UnraidBaseModel):
     chargeLevel: int | None = None
     estimatedRuntime: int | None = None
     health: str | None = None  # Battery health status
+
+    @property
+    def runtime_formatted(self) -> str | None:
+        """Return estimated runtime as a human-readable string.
+
+        Returns:
+            Formatted string like "2 hours 15 minutes" or None if unavailable.
+
+        """
+        if self.estimatedRuntime is None:
+            return None
+        return _format_duration(self.estimatedRuntime)
 
 
 class UPSPower(UnraidBaseModel):
@@ -457,6 +587,29 @@ class UPSDevice(UnraidBaseModel):
     status: str | None = None
     battery: UPSBattery = UPSBattery()
     power: UPSPower = UPSPower()
+
+    @property
+    def is_connected(self) -> bool:
+        """Return True if the UPS is connected and communicating."""
+        if self.status is None:
+            return False
+        return self.status.upper() not in {"OFFLINE", "OFF"}
+
+    def calculate_power_watts(self, nominal_power: int) -> float | None:
+        """Calculate current power draw in watts.
+
+        Args:
+            nominal_power: The UPS nominal power capacity in watts
+                (from user configuration, not available from the API).
+
+        Returns:
+            Power draw in watts rounded to 1 decimal, or None if
+            load percentage is unavailable.
+
+        """
+        if self.power.loadPercentage is None:
+            return None
+        return round((self.power.loadPercentage / 100) * nominal_power, 1)
 
 
 # =============================================================================
@@ -583,6 +736,18 @@ class SystemMetrics(UnraidBaseModel):
     # Uptime
     uptime: ParsedDatetime = None  # System boot time
 
+    @property
+    def average_cpu_temperature(self) -> float | None:
+        """Return the average CPU package temperature.
+
+        Returns:
+            Mean of all CPU package temperatures, or None if no data.
+
+        """
+        if not self.cpu_temperatures:
+            return None
+        return sum(self.cpu_temperatures) / len(self.cpu_temperatures)
+
     @classmethod
     def from_response(cls, data: dict[str, Any]) -> SystemMetrics:
         """Create SystemMetrics from GraphQL response.
@@ -605,6 +770,14 @@ class SystemMetrics(UnraidBaseModel):
         packages = cpu_info.get("packages", {}) or {}
         temps = packages.get("temp", []) or []
 
+        # Compute memory_used with fallback from total - available
+        memory_used = memory.get("used")
+        if memory_used is None:
+            mem_total = memory.get("total")
+            mem_available = memory.get("available")
+            if mem_total is not None and mem_available is not None:
+                memory_used = max(0, mem_total - mem_available)
+
         return cls(
             cpu_percent=cpu.get("percentTotal"),
             cpu_temperature=temps[0] if temps else None,
@@ -612,7 +785,7 @@ class SystemMetrics(UnraidBaseModel):
             cpu_power=packages.get("totalPower"),
             memory_percent=memory.get("percentTotal"),
             memory_total=memory.get("total"),
-            memory_used=memory.get("used"),
+            memory_used=memory_used,
             memory_free=memory.get("free"),
             memory_available=memory.get("available"),
             swap_percent=memory.get("percentSwapTotal"),
@@ -1126,6 +1299,99 @@ class ApiKey(UnraidBaseModel):
     roles: list[str] = []
     createdAt: str | None = None
     permissions: list[Permission] | None = None
+
+
+# =============================================================================
+# Docker Container Log Models
+# =============================================================================
+
+
+# =============================================================================
+# Version Info Model
+# =============================================================================
+
+
+class VersionInfo(UnraidBaseModel):
+    """Server version information.
+
+    Attributes:
+        api: The API version string.
+        unraid: The Unraid OS version string.
+
+    """
+
+    api: str = "unknown"
+    unraid: str = "unknown"
+
+
+# =============================================================================
+# Parity History Model
+# =============================================================================
+
+
+def _parse_parity_date(value: str | int | float | datetime | None) -> datetime | None:
+    """Parse a parity history date from various formats.
+
+    Handles ISO strings, epoch timestamps (int/float), datetime objects, and None.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, int | float):
+        from datetime import UTC
+
+        return datetime.fromtimestamp(value, tz=UTC)
+    if isinstance(value, str):
+        # Try ISO format first
+        try:
+            normalized = value.replace("Z", "+00:00") if value.endswith("Z") else value
+            return datetime.fromisoformat(normalized)
+        except ValueError:
+            pass
+        # Try epoch string
+        try:
+            from datetime import UTC
+
+            return datetime.fromtimestamp(float(value), tz=UTC)
+        except (ValueError, OSError):
+            pass
+    return None
+
+
+ParityDate = Annotated[datetime | None, BeforeValidator(_parse_parity_date)]
+
+
+class ParityHistoryEntry(UnraidBaseModel):
+    """A single parity check history entry.
+
+    Attributes:
+        date: When the parity check occurred.
+        duration: Duration in seconds.
+        speed: Speed of the parity check.
+        status: Result status of the check.
+        errors: Number of errors found.
+
+    """
+
+    date: ParityDate = None
+    duration: int | None = None
+    speed: str | int | None = None
+    status: str | None = None
+    errors: int | None = None
+
+    @property
+    def duration_formatted(self) -> str | None:
+        """Return duration as a human-readable string.
+
+        Returns:
+            Formatted string like "2 hours 15 minutes 30 seconds",
+            or None if duration is unavailable.
+
+        """
+        if self.duration is None:
+            return None
+        return _format_duration(self.duration)
 
 
 # =============================================================================

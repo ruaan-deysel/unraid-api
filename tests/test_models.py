@@ -11,10 +11,14 @@ from unraid_api.models import (
     DockerContainer,
     InfoOs,
     Notification,
+    ParityHistoryEntry,
     PhysicalDisk,
     Share,
     UnraidArray,
+    VersionInfo,
+    _format_duration,
     _parse_datetime,
+    format_bytes,
 )
 
 
@@ -1356,3 +1360,570 @@ class TestPermissionModel:
 
         assert perm.resource == "array"
         assert perm.actions == []
+
+
+# =============================================================================
+# Issue #15: format_bytes utility
+# =============================================================================
+
+
+class TestFormatBytes:
+    """Tests for format_bytes utility function."""
+
+    def test_none_returns_none(self) -> None:
+        """Test that None input returns None."""
+        assert format_bytes(None) is None
+
+    def test_zero_bytes(self) -> None:
+        """Test 0 bytes."""
+        assert format_bytes(0) == "0 B"
+
+    def test_bytes(self) -> None:
+        """Test small byte values."""
+        assert format_bytes(512) == "512 B"
+
+    def test_kilobytes(self) -> None:
+        """Test kilobyte values."""
+        assert format_bytes(1024) == "1 KB"
+        assert format_bytes(1536) == "1.5 KB"
+
+    def test_megabytes(self) -> None:
+        """Test megabyte values."""
+        assert format_bytes(1048576) == "1 MB"
+
+    def test_gigabytes(self) -> None:
+        """Test gigabyte values."""
+        assert format_bytes(1073741824) == "1 GB"
+
+    def test_terabytes(self) -> None:
+        """Test terabyte values."""
+        assert format_bytes(1099511627776) == "1 TB"
+
+    def test_petabytes(self) -> None:
+        """Test petabyte values."""
+        assert format_bytes(1125899906842624) == "1 PB"
+
+    def test_fractional_gb(self) -> None:
+        """Test fractional gigabyte values."""
+        result = format_bytes(int(1.5 * 1073741824))
+        assert result == "1.5 GB"
+
+
+# =============================================================================
+# Issue #15: _format_duration utility
+# =============================================================================
+
+
+class TestFormatDuration:
+    """Tests for _format_duration utility."""
+
+    def test_zero_seconds(self) -> None:
+        """Test 0 seconds."""
+        assert _format_duration(0) == "0 seconds"
+
+    def test_one_second(self) -> None:
+        """Test 1 second (singular)."""
+        assert _format_duration(1) == "1 second"
+
+    def test_seconds_only(self) -> None:
+        """Test seconds-only values."""
+        assert _format_duration(45) == "45 seconds"
+
+    def test_minutes_and_seconds(self) -> None:
+        """Test minutes and seconds."""
+        assert _format_duration(90) == "1 minute 30 seconds"
+
+    def test_hours_minutes_seconds(self) -> None:
+        """Test hours, minutes, and seconds."""
+        assert _format_duration(3661) == "1 hour 1 minute 1 second"
+
+    def test_hours_only(self) -> None:
+        """Test exact hours."""
+        assert _format_duration(7200) == "2 hours"
+
+    def test_negative_clamps_to_zero(self) -> None:
+        """Test that negative values clamp to 0."""
+        assert _format_duration(-5) == "0 seconds"
+
+    def test_large_duration(self) -> None:
+        """Test a large multi-hour duration."""
+        # 2h 15m 30s = 8130 seconds
+        assert _format_duration(8130) == "2 hours 15 minutes 30 seconds"
+
+
+# =============================================================================
+# Issue #15: SystemMetrics computed properties
+# =============================================================================
+
+
+class TestSystemMetricsComputedProperties:
+    """Tests for SystemMetrics computed properties."""
+
+    def test_average_cpu_temperature_multiple(self) -> None:
+        """Test average CPU temp with multiple packages."""
+        from unraid_api.models import SystemMetrics
+
+        metrics = SystemMetrics(cpu_temperatures=[50.0, 60.0, 70.0])
+        assert metrics.average_cpu_temperature == 60.0
+
+    def test_average_cpu_temperature_single(self) -> None:
+        """Test average CPU temp with single package."""
+        from unraid_api.models import SystemMetrics
+
+        metrics = SystemMetrics(cpu_temperatures=[55.0])
+        assert metrics.average_cpu_temperature == 55.0
+
+    def test_average_cpu_temperature_empty(self) -> None:
+        """Test average CPU temp with no data."""
+        from unraid_api.models import SystemMetrics
+
+        metrics = SystemMetrics()
+        assert metrics.average_cpu_temperature is None
+
+    def test_memory_used_fallback_in_from_response(self) -> None:
+        """Test memory_used falls back to total - available."""
+        from unraid_api.models import SystemMetrics
+
+        response = {
+            "metrics": {
+                "memory": {
+                    "total": 32000000000,
+                    "available": 20000000000,
+                    "percentTotal": 37.5,
+                }
+            }
+        }
+
+        metrics = SystemMetrics.from_response(response)
+        assert metrics.memory_used == 12000000000
+
+    def test_memory_used_direct_value(self) -> None:
+        """Test memory_used uses direct API value when available."""
+        from unraid_api.models import SystemMetrics
+
+        response = {
+            "metrics": {
+                "memory": {
+                    "total": 32000000000,
+                    "used": 15000000000,
+                    "available": 20000000000,
+                }
+            }
+        }
+
+        metrics = SystemMetrics.from_response(response)
+        assert metrics.memory_used == 15000000000
+
+
+# =============================================================================
+# Issue #16: ZFS disk usage fallback
+# =============================================================================
+
+
+class TestArrayDiskZFSFallback:
+    """Tests for ArrayDisk ZFS usage fallback."""
+
+    def test_fs_used_bytes_positive_value(self) -> None:
+        """Test fs_used_bytes with a positive fsUsed value."""
+        disk = ArrayDisk(id="disk:1", fsUsed=500)
+        assert disk.fs_used_bytes == 512000
+
+    def test_fs_used_bytes_zero_with_fallback(self) -> None:
+        """Test fs_used_bytes falls back to fsSize-fsFree when fsUsed=0."""
+        disk = ArrayDisk(id="disk:1", fsSize=1000, fsUsed=0, fsFree=700)
+        assert disk.fs_used_bytes == 300 * 1024
+
+    def test_fs_used_bytes_none_with_fallback(self) -> None:
+        """Test fs_used_bytes falls back when fsUsed is None."""
+        disk = ArrayDisk(id="disk:1", fsSize=1000, fsUsed=None, fsFree=700)
+        assert disk.fs_used_bytes == 300 * 1024
+
+    def test_fs_used_bytes_all_none(self) -> None:
+        """Test fs_used_bytes returns None when all values are None."""
+        disk = ArrayDisk(id="disk:1")
+        assert disk.fs_used_bytes is None
+
+    def test_usage_percent_zfs_fallback(self) -> None:
+        """Test usage_percent uses fallback for ZFS (fsUsed=0)."""
+        disk = ArrayDisk(id="disk:1", fsSize=1000, fsUsed=0, fsFree=700)
+        assert disk.usage_percent == 30.0
+
+    def test_usage_percent_positive_fsused(self) -> None:
+        """Test usage_percent with positive fsUsed."""
+        disk = ArrayDisk(id="disk:1", fsSize=1000, fsUsed=250)
+        assert disk.usage_percent == 25.0
+
+    def test_usage_percent_none_fssize(self) -> None:
+        """Test usage_percent returns None when fsSize is None."""
+        disk = ArrayDisk(id="disk:1", fsUsed=250)
+        assert disk.usage_percent is None
+
+    def test_usage_percent_zero_fssize(self) -> None:
+        """Test usage_percent returns None when fsSize is 0."""
+        disk = ArrayDisk(id="disk:1", fsSize=0, fsUsed=0)
+        assert disk.usage_percent is None
+
+    def test_fs_used_bytes_zero_no_fallback(self) -> None:
+        """Test fs_used_bytes when fsUsed=0 and no fsFree for fallback."""
+        disk = ArrayDisk(id="disk:1", fsUsed=0)
+        assert disk.fs_used_bytes == 0
+
+    def test_usage_percent_none_fsused_no_fsfree(self) -> None:
+        """Test usage_percent when fsUsed is None and fsFree also None."""
+        disk = ArrayDisk(id="disk:1", fsSize=1000, fsUsed=None, fsFree=None)
+        assert disk.usage_percent is None
+
+
+# =============================================================================
+# Issue #17: State helper properties
+# =============================================================================
+
+
+class TestArrayDiskIsHealthy:
+    """Tests for ArrayDisk.is_healthy property."""
+
+    def test_healthy_disk(self) -> None:
+        """Test is_healthy returns True for DISK_OK."""
+        disk = ArrayDisk(id="disk:1", status="DISK_OK")
+        assert disk.is_healthy is True
+
+    def test_unhealthy_disk(self) -> None:
+        """Test is_healthy returns False for non-OK status."""
+        disk = ArrayDisk(id="disk:1", status="DISK_DSBL")
+        assert disk.is_healthy is False
+
+    def test_none_status(self) -> None:
+        """Test is_healthy returns False for None status."""
+        disk = ArrayDisk(id="disk:1")
+        assert disk.is_healthy is False
+
+    def test_case_insensitive(self) -> None:
+        """Test is_healthy is case insensitive."""
+        disk = ArrayDisk(id="disk:1", status="disk_ok")
+        assert disk.is_healthy is True
+
+
+class TestDockerContainerIsRunning:
+    """Tests for DockerContainer.is_running property."""
+
+    def test_running(self) -> None:
+        """Test is_running for running container."""
+        c = DockerContainer(id="c:1", name="test", state="running")
+        assert c.is_running is True
+
+    def test_stopped(self) -> None:
+        """Test is_running for stopped container."""
+        c = DockerContainer(id="c:1", name="test", state="exited")
+        assert c.is_running is False
+
+    def test_none_state(self) -> None:
+        """Test is_running for None state."""
+        c = DockerContainer(id="c:1", name="test")
+        assert c.is_running is False
+
+    def test_case_insensitive(self) -> None:
+        """Test is_running is case insensitive."""
+        c = DockerContainer(id="c:1", name="test", state="RUNNING")
+        assert c.is_running is True
+
+
+class TestVmDomainIsRunning:
+    """Tests for VmDomain.is_running property."""
+
+    def test_running(self) -> None:
+        """Test is_running for running VM."""
+        from unraid_api.models import VmDomain
+
+        vm = VmDomain(id="vm:1", name="test", state="running")
+        assert vm.is_running is True
+
+    def test_idle(self) -> None:
+        """Test is_running for idle VM."""
+        from unraid_api.models import VmDomain
+
+        vm = VmDomain(id="vm:1", name="test", state="idle")
+        assert vm.is_running is True
+
+    def test_shutoff(self) -> None:
+        """Test is_running for shut off VM."""
+        from unraid_api.models import VmDomain
+
+        vm = VmDomain(id="vm:1", name="test", state="shutoff")
+        assert vm.is_running is False
+
+    def test_none_state(self) -> None:
+        """Test is_running for None state."""
+        from unraid_api.models import VmDomain
+
+        vm = VmDomain(id="vm:1", name="test")
+        assert vm.is_running is False
+
+
+class TestParityCheckHelpers:
+    """Tests for ParityCheck helper properties."""
+
+    def test_is_running_active(self) -> None:
+        """Test is_running when actively running."""
+        from unraid_api.models import ParityCheck
+
+        pc = ParityCheck(status="RUNNING")
+        assert pc.is_running is True
+
+    def test_is_running_paused(self) -> None:
+        """Test is_running when paused."""
+        from unraid_api.models import ParityCheck
+
+        pc = ParityCheck(status="PAUSED")
+        assert pc.is_running is True
+
+    def test_is_running_idle(self) -> None:
+        """Test is_running when idle."""
+        from unraid_api.models import ParityCheck
+
+        pc = ParityCheck(status="IDLE")
+        assert pc.is_running is False
+
+    def test_has_problem_failed(self) -> None:
+        """Test has_problem when failed."""
+        from unraid_api.models import ParityCheck
+
+        pc = ParityCheck(status="FAILED")
+        assert pc.has_problem is True
+
+    def test_has_problem_with_errors(self) -> None:
+        """Test has_problem with errors."""
+        from unraid_api.models import ParityCheck
+
+        pc = ParityCheck(status="RUNNING", errors=5)
+        assert pc.has_problem is True
+
+    def test_has_problem_clean(self) -> None:
+        """Test has_problem when clean."""
+        from unraid_api.models import ParityCheck
+
+        pc = ParityCheck(status="IDLE", errors=0)
+        assert pc.has_problem is False
+
+    def test_has_problem_none(self) -> None:
+        """Test has_problem with no data."""
+        from unraid_api.models import ParityCheck
+
+        pc = ParityCheck()
+        assert pc.has_problem is False
+
+
+# =============================================================================
+# Issue #18: ParityHistoryEntry model
+# =============================================================================
+
+
+class TestParityHistoryEntry:
+    """Tests for ParityHistoryEntry model."""
+
+    def test_creation_with_all_fields(self) -> None:
+        """Test creating with all fields."""
+        entry = ParityHistoryEntry(
+            date="2024-01-15T10:30:00Z",
+            duration=8130,
+            speed="150 MB/s",
+            status="OK",
+            errors=0,
+        )
+
+        assert entry.date is not None
+        assert entry.date.year == 2024
+        assert entry.duration == 8130
+        assert entry.speed == "150 MB/s"
+        assert entry.status == "OK"
+        assert entry.errors == 0
+
+    def test_duration_formatted(self) -> None:
+        """Test duration_formatted property."""
+        entry = ParityHistoryEntry(duration=8130)
+        assert entry.duration_formatted == "2 hours 15 minutes 30 seconds"
+
+    def test_duration_formatted_none(self) -> None:
+        """Test duration_formatted when duration is None."""
+        entry = ParityHistoryEntry()
+        assert entry.duration_formatted is None
+
+    def test_epoch_date(self) -> None:
+        """Test parsing epoch timestamp for date."""
+        entry = ParityHistoryEntry(date=1705312200)
+        assert entry.date is not None
+        assert entry.date.year == 2024
+
+    def test_date_none(self) -> None:
+        """Test date when None."""
+        entry = ParityHistoryEntry()
+        assert entry.date is None
+
+    def test_epoch_string_date(self) -> None:
+        """Test parsing epoch as string for date."""
+        entry = ParityHistoryEntry(date="1705312200")
+        assert entry.date is not None
+
+    def test_invalid_date_string(self) -> None:
+        """Test invalid date string returns None."""
+        entry = ParityHistoryEntry(date="not-a-date")
+        assert entry.date is None
+
+    def test_datetime_object_date(self) -> None:
+        """Test passing datetime directly for date."""
+        dt = datetime(2024, 1, 15, tzinfo=UTC)
+        entry = ParityHistoryEntry(date=dt)
+        assert entry.date == dt
+
+    def test_float_epoch_date(self) -> None:
+        """Test float epoch timestamp for date."""
+        entry = ParityHistoryEntry(date=1705312200.5)
+        assert entry.date is not None
+
+
+# =============================================================================
+# Issue #19: UPS helpers
+# =============================================================================
+
+
+class TestUPSBatteryRuntimeFormatted:
+    """Tests for UPSBattery.runtime_formatted property."""
+
+    def test_runtime_formatted(self) -> None:
+        """Test runtime_formatted with a typical value."""
+        from unraid_api.models import UPSBattery
+
+        battery = UPSBattery(estimatedRuntime=8130)
+        assert battery.runtime_formatted == "2 hours 15 minutes 30 seconds"
+
+    def test_runtime_formatted_none(self) -> None:
+        """Test runtime_formatted when no data."""
+        from unraid_api.models import UPSBattery
+
+        battery = UPSBattery()
+        assert battery.runtime_formatted is None
+
+    def test_runtime_formatted_zero(self) -> None:
+        """Test runtime_formatted for 0 seconds."""
+        from unraid_api.models import UPSBattery
+
+        battery = UPSBattery(estimatedRuntime=0)
+        assert battery.runtime_formatted == "0 seconds"
+
+    def test_runtime_formatted_minutes_only(self) -> None:
+        """Test runtime_formatted with minutes only."""
+        from unraid_api.models import UPSBattery
+
+        battery = UPSBattery(estimatedRuntime=1800)
+        assert battery.runtime_formatted == "30 minutes"
+
+
+class TestUPSDeviceHelpers:
+    """Tests for UPSDevice helper methods."""
+
+    def test_is_connected_online(self) -> None:
+        """Test is_connected for online UPS."""
+        from unraid_api.models import UPSDevice
+
+        ups = UPSDevice(id="ups:1", name="test", status="ONLINE")
+        assert ups.is_connected is True
+
+    def test_is_connected_offline(self) -> None:
+        """Test is_connected for offline UPS."""
+        from unraid_api.models import UPSDevice
+
+        ups = UPSDevice(id="ups:1", name="test", status="OFFLINE")
+        assert ups.is_connected is False
+
+    def test_is_connected_off(self) -> None:
+        """Test is_connected for OFF UPS."""
+        from unraid_api.models import UPSDevice
+
+        ups = UPSDevice(id="ups:1", name="test", status="OFF")
+        assert ups.is_connected is False
+
+    def test_is_connected_none(self) -> None:
+        """Test is_connected for None status."""
+        from unraid_api.models import UPSDevice
+
+        ups = UPSDevice(id="ups:1", name="test")
+        assert ups.is_connected is False
+
+    def test_calculate_power_watts(self) -> None:
+        """Test power calculation."""
+        from unraid_api.models import UPSDevice, UPSPower
+
+        ups = UPSDevice(
+            id="ups:1",
+            name="test",
+            power=UPSPower(loadPercentage=25.0),
+        )
+        result = ups.calculate_power_watts(1500)
+        assert result == 375.0
+
+    def test_calculate_power_watts_none_load(self) -> None:
+        """Test power calculation with no load data."""
+        from unraid_api.models import UPSDevice
+
+        ups = UPSDevice(id="ups:1", name="test")
+        assert ups.calculate_power_watts(1500) is None
+
+    def test_calculate_power_watts_zero_load(self) -> None:
+        """Test power calculation with zero load."""
+        from unraid_api.models import UPSDevice, UPSPower
+
+        ups = UPSDevice(
+            id="ups:1",
+            name="test",
+            power=UPSPower(loadPercentage=0.0),
+        )
+        assert ups.calculate_power_watts(1500) == 0.0
+
+
+# =============================================================================
+# Issue #21: VersionInfo model
+# =============================================================================
+
+
+class TestVersionInfo:
+    """Tests for VersionInfo model."""
+
+    def test_version_info_with_values(self) -> None:
+        """Test VersionInfo with version strings."""
+        vi = VersionInfo(api="4.29.2", unraid="7.2.0")
+        assert vi.api == "4.29.2"
+        assert vi.unraid == "7.2.0"
+
+    def test_version_info_defaults(self) -> None:
+        """Test VersionInfo default values."""
+        vi = VersionInfo()
+        assert vi.api == "unknown"
+        assert vi.unraid == "unknown"
+
+
+# =============================================================================
+# Issue #17: Constants module
+# =============================================================================
+
+
+class TestConstants:
+    """Tests for constants module."""
+
+    def test_min_versions_defined(self) -> None:
+        """Test that minimum version constants are defined."""
+        from unraid_api.const import MIN_API_VERSION, MIN_UNRAID_VERSION
+
+        assert MIN_API_VERSION == "4.29.2"
+        assert MIN_UNRAID_VERSION == "7.2.3"
+
+    def test_container_states_defined(self) -> None:
+        """Test that container state constants are defined."""
+        from unraid_api.const import CONTAINER_STATE_RUNNING, CONTAINER_STATE_STOPPED
+
+        assert CONTAINER_STATE_RUNNING == "running"
+        assert CONTAINER_STATE_STOPPED == "stopped"
+
+    def test_disk_status_constants(self) -> None:
+        """Test that disk status constants are defined."""
+        from unraid_api.const import DISK_STATUS_OK
+
+        assert DISK_STATUS_OK == "DISK_OK"

@@ -8,6 +8,7 @@ import sys
 sys.path.insert(0, "src")
 
 from unraid_api import UnraidClient
+from unraid_api.models import ParityCheck, format_bytes
 
 
 async def main() -> None:
@@ -39,16 +40,27 @@ async def main() -> None:
             tests.append(("test_connection", f"FAIL: {e}"))
             print(f"✗ test_connection: {e}")
 
-        # 2. Version
+        # 2. Version (Issue #21 - now returns VersionInfo model)
         try:
             result = await client.get_version()
+            if not hasattr(result, "api") or not hasattr(result, "unraid"):
+                raise TypeError(f"Expected VersionInfo model, got {type(result).__name__}")
             tests.append(("get_version", "PASS"))
-            print(f"✓ get_version: Unraid {result.get('unraid')}, API {result.get('api')}")
+            print(f"✓ get_version: Unraid {result.unraid}, API {result.api} (type={type(result).__name__})")
         except Exception as e:
             tests.append(("get_version", f"FAIL: {e}"))
             print(f"✗ get_version: {e}")
 
-        # 3. System Info
+        # 3. Compatibility Check (Issue #20)
+        try:
+            await client.check_compatibility()
+            tests.append(("check_compatibility", "PASS"))
+            print("✓ check_compatibility: server is compatible")
+        except Exception as e:
+            tests.append(("check_compatibility", f"FAIL: {e}"))
+            print(f"✗ check_compatibility: {e}")
+
+        # 4. System Info
         try:
             result = await client.get_system_info()
             tests.append(("get_system_info", "PASS"))
@@ -57,7 +69,7 @@ async def main() -> None:
             tests.append(("get_system_info", f"FAIL: {e}"))
             print(f"✗ get_system_info: {e}")
 
-        # 4. Registration
+        # 5. Registration
         try:
             result = await client.get_registration()
             tests.append(("get_registration", "PASS"))
@@ -66,7 +78,7 @@ async def main() -> None:
             tests.append(("get_registration", f"FAIL: {e}"))
             print(f"✗ get_registration: {e}")
 
-        # 5. Vars
+        # 6. Vars
         try:
             result = await client.get_vars()
             tests.append(("get_vars", "PASS"))
@@ -75,18 +87,22 @@ async def main() -> None:
             tests.append(("get_vars", f"FAIL: {e}"))
             print(f"✗ get_vars: {e}")
 
-        # 6. System Metrics (CPU temp & power)
+        # 7. System Metrics (Issue #15 - average_cpu_temperature, memory_used fallback, format_bytes)
         try:
             result = await client.get_system_metrics()
+            avg_temp = result.average_cpu_temperature
+            mem_used = result.memory_used
+            mem_fmt = format_bytes(result.memory_used)
             tests.append(("get_system_metrics", "PASS"))
             print(f"✓ get_system_metrics: cpu={result.cpu_percent}%, temp={result.cpu_temperature}°C, power={result.cpu_power}W")
             print(f"  → cpu_temperatures: {result.cpu_temperatures}")
-            print(f"  → memory: {result.memory_percent}%")
+            print(f"  → avg_cpu_temperature: {avg_temp}")
+            print(f"  → memory: {result.memory_percent}%, used={mem_fmt}, total={format_bytes(result.memory_total)}")
         except Exception as e:
             tests.append(("get_system_metrics", f"FAIL: {e}"))
             print(f"✗ get_system_metrics: {e}")
 
-        # 7. Owner
+        # 8. Owner
         try:
             result = await client.get_owner()
             tests.append(("get_owner", "PASS"))
@@ -95,7 +111,7 @@ async def main() -> None:
             tests.append(("get_owner", f"FAIL: {e}"))
             print(f"✗ get_owner: {e}")
 
-        # 7. Flash
+        # 9. Flash
         try:
             result = await client.get_flash()
             tests.append(("get_flash", "PASS"))
@@ -104,7 +120,7 @@ async def main() -> None:
             tests.append(("get_flash", f"FAIL: {e}"))
             print(f"✗ get_flash: {e}")
 
-        # 8. Services
+        # 10. Services
         try:
             result = await client.get_services()
             tests.append(("get_services", "PASS"))
@@ -114,7 +130,7 @@ async def main() -> None:
             tests.append(("get_services", f"FAIL: {e}"))
             print(f"✗ get_services: {e}")
 
-        # 9. Array
+        # 11. Array
         try:
             result = await client.get_array_status()
             tests.append(("get_array_status", "PASS"))
@@ -123,13 +139,12 @@ async def main() -> None:
             tests.append(("get_array_status", f"FAIL: {e}"))
             print(f"✗ get_array_status: {e}")
 
-        # 10. Array Disks (safe - doesn't wake sleeping disks)
+        # 12. Array Disks (safe - doesn't wake sleeping disks)
         try:
             result = await client.get_array_disks()
             total_disks = len(result.get("disks", []))
             parities = len(result.get("parities", []))
             caches = len(result.get("caches", []))
-            # Count spinning vs standby disks
             all_disks = result.get("disks", []) + result.get("parities", []) + result.get("caches", [])
             spinning = sum(1 for d in all_disks if d.get("isSpinning"))
             standby = len(all_disks) - spinning
@@ -139,7 +154,7 @@ async def main() -> None:
             tests.append(("get_array_disks", f"FAIL: {e}"))
             print(f"✗ get_array_disks: {e}")
 
-        # 11. Shares
+        # 13. Shares
         try:
             result = await client.get_shares()
             tests.append(("get_shares", "PASS"))
@@ -148,7 +163,7 @@ async def main() -> None:
             tests.append(("get_shares", f"FAIL: {e}"))
             print(f"✗ get_shares: {e}")
 
-        # 12. Docker Containers
+        # 14. Docker Containers
         try:
             result = await client.get_containers()
             tests.append(("get_containers", "PASS"))
@@ -158,7 +173,7 @@ async def main() -> None:
             tests.append(("get_containers", f"FAIL: {e}"))
             print(f"✗ get_containers: {e}")
 
-        # 13. Docker Networks
+        # 15. Docker Networks
         try:
             result = await client.get_docker_networks()
             tests.append(("get_docker_networks", "PASS"))
@@ -167,7 +182,7 @@ async def main() -> None:
             tests.append(("get_docker_networks", f"FAIL: {e}"))
             print(f"✗ get_docker_networks: {e}")
 
-        # 14. VMs
+        # 16. VMs
         try:
             result = await client.get_vms()
             tests.append(("get_vms", "PASS"))
@@ -176,7 +191,7 @@ async def main() -> None:
             tests.append(("get_vms", f"FAIL: {e}"))
             print(f"✗ get_vms: {e}")
 
-        # 15. UPS
+        # 17. UPS
         try:
             result = await client.get_ups_status()
             tests.append(("get_ups_status", "PASS"))
@@ -185,7 +200,7 @@ async def main() -> None:
             tests.append(("get_ups_status", f"FAIL: {e}"))
             print(f"✗ get_ups_status: {e}")
 
-        # 16. Plugins
+        # 18. Plugins
         try:
             result = await client.get_plugins()
             tests.append(("get_plugins", "PASS"))
@@ -194,7 +209,7 @@ async def main() -> None:
             tests.append(("get_plugins", f"FAIL: {e}"))
             print(f"✗ get_plugins: {e}")
 
-        # 17. Notifications
+        # 19. Notifications
         try:
             result = await client.get_notifications()
             tests.append(("get_notifications", "PASS"))
@@ -203,16 +218,18 @@ async def main() -> None:
             tests.append(("get_notifications", f"FAIL: {e}"))
             print(f"✗ get_notifications: {e}")
 
-        # 18. Parity History
+        # 20. Parity History (Issue #18 - now returns list[ParityHistoryEntry])
         try:
             result = await client.get_parity_history()
             tests.append(("get_parity_history", "PASS"))
-            print(f"✓ get_parity_history: {len(result)} entries")
+            print(f"✓ get_parity_history: {len(result)} entries (type={type(result[0]).__name__ if result else 'N/A'})")
+            for entry in result[:2]:
+                print(f"  → date={entry.date}, duration={entry.duration_formatted}, errors={entry.errors}")
         except Exception as e:
             tests.append(("get_parity_history", f"FAIL: {e}"))
             print(f"✗ get_parity_history: {e}")
 
-        # 19. Log Files
+        # 21. Log Files
         try:
             result = await client.get_log_files()
             tests.append(("get_log_files", "PASS"))
@@ -221,7 +238,7 @@ async def main() -> None:
             tests.append(("get_log_files", f"FAIL: {e}"))
             print(f"✗ get_log_files: {e}")
 
-        # 20. Cloud
+        # 22. Cloud
         try:
             result = await client.get_cloud()
             tests.append(("get_cloud", "PASS"))
@@ -231,7 +248,7 @@ async def main() -> None:
             tests.append(("get_cloud", f"FAIL: {e}"))
             print(f"✗ get_cloud: {e}")
 
-        # 21. Connect
+        # 23. Connect
         try:
             result = await client.get_connect()
             tests.append(("get_connect", "PASS"))
@@ -240,7 +257,7 @@ async def main() -> None:
             tests.append(("get_connect", f"FAIL: {e}"))
             print(f"✗ get_connect: {e}")
 
-        # 22. Remote Access
+        # 24. Remote Access
         try:
             result = await client.get_remote_access()
             tests.append(("get_remote_access", "PASS"))
@@ -249,10 +266,28 @@ async def main() -> None:
             tests.append(("get_remote_access", f"FAIL: {e}"))
             print(f"✗ get_remote_access: {e}")
 
-        # Typed methods
+        # 25. User Account
+        try:
+            result = await client.typed_get_me()
+            tests.append(("typed_get_me", "PASS"))
+            print(f"✓ typed_get_me: name={result.name}, roles={result.roles}")
+        except Exception as e:
+            tests.append(("typed_get_me", f"FAIL: {e}"))
+            print(f"✗ typed_get_me: {e}")
+
+        # 26. API Keys
+        try:
+            result = await client.typed_get_api_keys()
+            tests.append(("typed_get_api_keys", "PASS"))
+            print(f"✓ typed_get_api_keys: {len(result)} keys")
+        except Exception as e:
+            tests.append(("typed_get_api_keys", f"FAIL: {e}"))
+            print(f"✗ typed_get_api_keys: {e}")
+
+        # --- Typed Methods (Pydantic Models) ---
         print("\n--- Typed Methods (Pydantic Models) ---")
 
-        # 25. typed_get_vars
+        # 27. typed_get_vars
         try:
             result = await client.typed_get_vars()
             tests.append(("typed_get_vars", "PASS"))
@@ -261,7 +296,7 @@ async def main() -> None:
             tests.append(("typed_get_vars", f"FAIL: {e}"))
             print(f"✗ typed_get_vars: {e}")
 
-        # 26. typed_get_registration
+        # 28. typed_get_registration
         try:
             result = await client.typed_get_registration()
             tests.append(("typed_get_registration", "PASS"))
@@ -270,7 +305,7 @@ async def main() -> None:
             tests.append(("typed_get_registration", f"FAIL: {e}"))
             print(f"✗ typed_get_registration: {e}")
 
-        # 27. typed_get_services
+        # 29. typed_get_services
         try:
             result = await client.typed_get_services()
             tests.append(("typed_get_services", "PASS"))
@@ -279,25 +314,57 @@ async def main() -> None:
             tests.append(("typed_get_services", f"FAIL: {e}"))
             print(f"✗ typed_get_services: {e}")
 
-        # 28. typed_get_array
+        # 30. typed_get_array (Issues #16, #17 - ZFS fallback, is_healthy)
         try:
             result = await client.typed_get_array()
             tests.append(("typed_get_array", "PASS"))
-            print(f"✓ typed_get_array: state={result.state}")
+            print(f"✓ typed_get_array: state={result.state}, disks={len(result.disks)}")
+            for disk in result.disks[:3]:
+                print(f"  → {disk.name or disk.id}: healthy={disk.is_healthy}, used={format_bytes(disk.fs_used_bytes)}, {disk.usage_percent}%")
         except Exception as e:
             tests.append(("typed_get_array", f"FAIL: {e}"))
             print(f"✗ typed_get_array: {e}")
 
-        # 29. typed_get_containers
+        # 31. typed_get_containers (Issue #12 - new fields, Issue #17 - is_running)
         try:
             result = await client.typed_get_containers()
             tests.append(("typed_get_containers", "PASS"))
             print(f"✓ typed_get_containers: {len(result)} containers")
+            for c in result[:3]:
+                update = " [UPDATE]" if getattr(c, "isUpdateAvailable", False) else ""
+                print(f"  → {c.names}: running={c.is_running}, icon={getattr(c, 'iconUrl', None)}{update}")
         except Exception as e:
             tests.append(("typed_get_containers", f"FAIL: {e}"))
             print(f"✗ typed_get_containers: {e}")
 
-        # 30. typed_get_shares
+        # 32. typed_get_vms (Issue #17 - is_running)
+        try:
+            result = await client.typed_get_vms()
+            tests.append(("typed_get_vms", "PASS"))
+            print(f"✓ typed_get_vms: {len(result)} VMs")
+            for vm in result[:3]:
+                print(f"  → {vm.name}: running={vm.is_running}, state={vm.state}")
+        except Exception as e:
+            tests.append(("typed_get_vms", f"FAIL: {e}"))
+            print(f"✗ typed_get_vms: {e}")
+
+        # 33. typed_get_ups_devices (Issue #19 - is_connected, calculate_power_watts, runtime_formatted)
+        try:
+            result = await client.typed_get_ups_devices()
+            tests.append(("typed_get_ups_devices", "PASS"))
+            print(f"✓ typed_get_ups_devices: {len(result)} devices")
+            for ups in result:
+                print(f"  → {ups.name}: connected={ups.is_connected}, status={ups.status}")
+                if ups.battery:
+                    print(f"    battery: charge={ups.battery.chargeLevel}%, runtime={ups.battery.runtime_formatted}")
+                watts = ups.calculate_power_watts(1500)
+                if watts is not None:
+                    print(f"    est. power: {watts:.0f}W (1500W nominal)")
+        except Exception as e:
+            tests.append(("typed_get_ups_devices", f"FAIL: {e}"))
+            print(f"✗ typed_get_ups_devices: {e}")
+
+        # 34. typed_get_shares
         try:
             result = await client.typed_get_shares()
             tests.append(("typed_get_shares", "PASS"))
@@ -306,15 +373,112 @@ async def main() -> None:
             tests.append(("typed_get_shares", f"FAIL: {e}"))
             print(f"✗ typed_get_shares: {e}")
 
+        # 35. typed_get_flash
+        try:
+            result = await client.typed_get_flash()
+            tests.append(("typed_get_flash", "PASS"))
+            print(f"✓ typed_get_flash: {result.vendor} {result.product}")
+        except Exception as e:
+            tests.append(("typed_get_flash", f"FAIL: {e}"))
+            print(f"✗ typed_get_flash: {e}")
+
+        # 36. typed_get_owner
+        try:
+            result = await client.typed_get_owner()
+            tests.append(("typed_get_owner", "PASS"))
+            print(f"✓ typed_get_owner: {result.username}")
+        except Exception as e:
+            tests.append(("typed_get_owner", f"FAIL: {e}"))
+            print(f"✗ typed_get_owner: {e}")
+
+        # 37. typed_get_plugins
+        try:
+            result = await client.typed_get_plugins()
+            tests.append(("typed_get_plugins", "PASS"))
+            print(f"✓ typed_get_plugins: {len(result)} plugins")
+        except Exception as e:
+            tests.append(("typed_get_plugins", f"FAIL: {e}"))
+            print(f"✗ typed_get_plugins: {e}")
+
+        # 38. typed_get_docker_networks
+        try:
+            result = await client.typed_get_docker_networks()
+            tests.append(("typed_get_docker_networks", "PASS"))
+            print(f"✓ typed_get_docker_networks: {len(result)} networks")
+        except Exception as e:
+            tests.append(("typed_get_docker_networks", f"FAIL: {e}"))
+            print(f"✗ typed_get_docker_networks: {e}")
+
+        # 39. typed_get_log_files
+        try:
+            result = await client.typed_get_log_files()
+            tests.append(("typed_get_log_files", "PASS"))
+            print(f"✓ typed_get_log_files: {len(result)} files")
+        except Exception as e:
+            tests.append(("typed_get_log_files", f"FAIL: {e}"))
+            print(f"✗ typed_get_log_files: {e}")
+
+        # 40. get_notification_overview
+        try:
+            result = await client.get_notification_overview()
+            tests.append(("get_notification_overview", "PASS"))
+            print(f"✓ get_notification_overview: unread={result.unread.total}, archive={result.archive.total}")
+        except Exception as e:
+            tests.append(("get_notification_overview", f"FAIL: {e}"))
+            print(f"✗ get_notification_overview: {e}")
+
+        # 41. typed_get_cloud
+        try:
+            result = await client.typed_get_cloud()
+            tests.append(("typed_get_cloud", "PASS"))
+            print(f"✓ typed_get_cloud: type={type(result).__name__}")
+        except Exception as e:
+            tests.append(("typed_get_cloud", f"FAIL: {e}"))
+            print(f"✗ typed_get_cloud: {e}")
+
+        # 42. typed_get_connect
+        try:
+            result = await client.typed_get_connect()
+            tests.append(("typed_get_connect", "PASS"))
+            print(f"✓ typed_get_connect: type={type(result).__name__}")
+        except Exception as e:
+            tests.append(("typed_get_connect", f"FAIL: {e}"))
+            print(f"✗ typed_get_connect: {e}")
+
+        # 43. typed_get_remote_access
+        try:
+            result = await client.typed_get_remote_access()
+            tests.append(("typed_get_remote_access", "PASS"))
+            print(f"✓ typed_get_remote_access: type={type(result).__name__}")
+        except Exception as e:
+            tests.append(("typed_get_remote_access", f"FAIL: {e}"))
+            print(f"✗ typed_get_remote_access: {e}")
+
+        # 44. Parity check helpers (Issue #17)
+        try:
+            array_raw = await client.get_array_status()
+            parity_data = array_raw.get("parityCheck")
+            if parity_data:
+                parity = ParityCheck(**parity_data)
+                tests.append(("parity_check_helpers", "PASS"))
+                print(f"✓ parity_check_helpers: running={parity.is_running}, has_problem={parity.has_problem}")
+            else:
+                tests.append(("parity_check_helpers", "PASS (no data)"))
+                print("✓ parity_check_helpers: no parity check data (normal)")
+        except Exception as e:
+            tests.append(("parity_check_helpers", f"FAIL: {e}"))
+            print(f"✗ parity_check_helpers: {e}")
+
         # Summary
         print("\n" + "=" * 60)
-        passed = sum(1 for _, r in tests if r == "PASS")
+        passed = sum(1 for _, r in tests if r.startswith("PASS"))
         print(f"RESULT: {passed}/{len(tests)} tests passed")
         if passed < len(tests):
             print("\nFailed:")
             for n, r in tests:
-                if r != "PASS":
+                if not r.startswith("PASS"):
                     print(f"  {n}: {r}")
+        print("=" * 60)
 
 
 if __name__ == "__main__":
