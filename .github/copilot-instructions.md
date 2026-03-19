@@ -172,6 +172,38 @@ async with UnraidClient("192.168.1.100", "your-api-key") as client:
 - **Bug fixes**: PATCH version bump
 - **Breaking changes**: MAJOR version bump (rare)
 
+## Live API Testing
+
+A unified test script at `scripts/unraid-api-client.py` tests the library against a real Unraid server.
+
+### Credentials
+Create `scripts/.env` with:
+```
+IP: 192.168.x.x
+API Key: your-api-key-here
+```
+Environment variables `UNRAID_HOST` and `UNRAID_API_KEY` override the `.env` file.
+
+### Running Tests
+```bash
+# Query tests (54 read-only tests covering all methods)
+python scripts/unraid-api-client.py
+
+# WebSocket subscription tests (7 tests)
+python scripts/unraid-api-client.py --subscriptions
+
+# SSL detection tests
+python scripts/unraid-api-client.py --ssl
+
+# Run everything
+python scripts/unraid-api-client.py --all
+```
+
+### Test Suites
+- **Query tests**: Connection, version, compatibility, system info, registration, vars, metrics, owner, flash, services, array, disks, shares, containers, networks, VMs, UPS, plugins, notifications, parity history, logs, cloud, connect, remote access, user account, API keys, all typed methods, v4.30.0 features
+- **Subscription tests**: CPU metrics, memory metrics, CPU telemetry, array updates, UPS updates, container stats, raw subscribe
+- **SSL tests**: Standard ports, same-port (ha-unraid behavior), nginx 400 detection, HTTP-as-single-port
+
 ## Dependencies
 
 Core: `aiohttp>=3.9.0`, `pydantic>=2.0.0`

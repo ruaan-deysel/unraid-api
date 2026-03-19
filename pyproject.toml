@@ -106,7 +106,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*" = ["S101", "ARG001", "PLR2004"]
+"tests/**/*" = ["S101", "S104", "S604", "ARG001", "PLR2004"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["unraid_api"]
@@ -165,3 +165,10 @@ exclude_lines = [
 ]
 fail_under = 97
 show_missing = true
+
+# =============================================================================
+# Bandit Configuration
+# =============================================================================
+[tool.bandit]
+targets = ["src/unraid_api"]
+skips = ["B101"]  # Skip assert_used (used in tests)

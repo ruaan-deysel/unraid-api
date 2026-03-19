@@ -1879,6 +1879,40 @@ class TestUPSDeviceHelpers:
         assert ups.calculate_power_watts(1500) == 0.0
 
 
+class TestUPSPowerFields:
+    """Tests for UPSPower nominalPower and currentPower fields."""
+
+    def test_ups_power_with_nominal_and_current(self) -> None:
+        """Test UPSPower with nominalPower and currentPower."""
+        from unraid_api.models import UPSPower
+
+        power = UPSPower(
+            inputVoltage=120.0,
+            outputVoltage=120.0,
+            loadPercentage=25,
+            nominalPower=1500,
+            currentPower=375.0,
+        )
+        assert power.nominalPower == 1500
+        assert power.currentPower == 375.0
+
+    def test_ups_power_nominal_and_current_default_none(self) -> None:
+        """Test nominalPower and currentPower default to None."""
+        from unraid_api.models import UPSPower
+
+        power = UPSPower()
+        assert power.nominalPower is None
+        assert power.currentPower is None
+
+    def test_ups_power_nominal_without_current(self) -> None:
+        """Test UPSPower with only nominalPower (no currentPower)."""
+        from unraid_api.models import UPSPower
+
+        power = UPSPower(nominalPower=900)
+        assert power.nominalPower == 900
+        assert power.currentPower is None
+
+
 # =============================================================================
 # Issue #21: VersionInfo model
 # =============================================================================
@@ -1927,3 +1961,684 @@ class TestConstants:
         from unraid_api.const import DISK_STATUS_OK
 
         assert DISK_STATUS_OK == "DISK_OK"
+
+
+# =============================================================================
+# v4.30.0 New Model Tests
+# =============================================================================
+
+
+class TestTailscaleStatus:
+    """Tests for TailscaleStatus model."""
+
+    def test_tailscale_status_all_fields(self) -> None:
+        """Test TailscaleStatus with all fields."""
+        from unraid_api.models import TailscaleStatus
+
+        status = TailscaleStatus(
+            hostname="my-container",
+            dnsName="my-container.tail12345.ts.net.",
+            online=True,
+        )
+
+        assert status.hostname == "my-container"
+        assert status.dnsName == "my-container.tail12345.ts.net."
+        assert status.online is True
+
+    def test_tailscale_status_defaults(self) -> None:
+        """Test TailscaleStatus with default (None) values."""
+        from unraid_api.models import TailscaleStatus
+
+        status = TailscaleStatus()
+
+        assert status.hostname is None
+        assert status.dnsName is None
+        assert status.online is None
+
+
+class TestContainerTemplatePort:
+    """Tests for ContainerTemplatePort model."""
+
+    def test_template_port_all_fields(self) -> None:
+        """Test ContainerTemplatePort with all fields."""
+        from unraid_api.models import ContainerTemplatePort
+
+        port = ContainerTemplatePort(
+            ip="0.0.0.0",
+            privatePort=8080,
+            publicPort=8080,
+            type="tcp",
+        )
+
+        assert port.ip == "0.0.0.0"
+        assert port.privatePort == 8080
+        assert port.publicPort == 8080
+        assert port.type == "tcp"
+
+
+class TestContainerUpdateStatus:
+    """Tests for ContainerUpdateStatus model."""
+
+    def test_update_status_up_to_date(self) -> None:
+        """Test ContainerUpdateStatus for an up-to-date container."""
+        from unraid_api.models import ContainerUpdateStatus
+
+        status = ContainerUpdateStatus(
+            name="plex",
+            updateStatus="UP_TO_DATE",
+        )
+
+        assert status.name == "plex"
+        assert status.updateStatus == "UP_TO_DATE"
+
+    def test_update_status_update_available(self) -> None:
+        """Test ContainerUpdateStatus for a container with available update."""
+        from unraid_api.models import ContainerUpdateStatus
+
+        status = ContainerUpdateStatus(
+            name="sonarr",
+            updateStatus="UPDATE_AVAILABLE",
+        )
+
+        assert status.name == "sonarr"
+        assert status.updateStatus == "UPDATE_AVAILABLE"
+
+
+class TestUPSConfiguration:
+    """Tests for UPSConfiguration model."""
+
+    def test_ups_config_all_fields(self) -> None:
+        """Test UPSConfiguration with all fields."""
+        from unraid_api.models import UPSConfiguration
+
+        config = UPSConfiguration(
+            service=None,
+            upsCable="usb",
+            customUpsCable=None,
+            upsType=None,
+            device=None,
+            overrideUpsCapacity=False,
+            batteryLevel=10,
+            minutes=5,
+            timeout=0,
+            killUps=False,
+            nisIp="",
+            netServer=None,
+            upsName="ups",
+            modelName=None,
+        )
+
+        assert config.upsCable == "usb"
+        assert config.batteryLevel == 10
+        assert config.minutes == 5
+        assert config.killUps is False
+        assert config.upsName == "ups"
+
+    def test_ups_config_defaults(self) -> None:
+        """Test UPSConfiguration with default values."""
+        from unraid_api.models import UPSConfiguration
+
+        config = UPSConfiguration()
+
+        assert config.service is None
+        assert config.upsCable is None
+        assert config.batteryLevel is None
+
+
+class TestDisplaySettings:
+    """Tests for DisplaySettings model."""
+
+    def test_display_settings_all_fields(self) -> None:
+        """Test DisplaySettings with all fields."""
+        from unraid_api.models import DisplaySettings
+
+        settings = DisplaySettings(
+            theme="white",
+            unit="CELSIUS",
+            scale=False,
+            tabs=True,
+            resize=False,
+            wwn=False,
+            total=True,
+            usage=False,
+            text=False,
+            warning=70,
+            critical=90,
+            hot=45,
+            max=55,
+            locale="en_US",
+        )
+
+        assert settings.theme == "white"
+        assert settings.unit == "CELSIUS"
+        assert settings.scale is False
+        assert settings.tabs is True
+        assert settings.warning == 70
+        assert settings.critical == 90
+        assert settings.hot == 45
+        assert settings.max == 55
+        assert settings.locale == "en_US"
+
+    def test_display_settings_defaults(self) -> None:
+        """Test DisplaySettings with default values."""
+        from unraid_api.models import DisplaySettings
+
+        settings = DisplaySettings()
+
+        assert settings.theme is None
+        assert settings.unit is None
+        assert settings.warning is None
+
+
+class TestDockerPortConflicts:
+    """Tests for DockerPortConflicts models."""
+
+    def test_port_conflicts_with_data(self) -> None:
+        """Test DockerPortConflicts with conflict data."""
+        from unraid_api.models import (
+            DockerLanPortConflict,
+            DockerPortConflictContainer,
+            DockerPortConflicts,
+        )
+
+        conflicts = DockerPortConflicts(
+            lanPorts=[
+                DockerLanPortConflict(
+                    containers=[
+                        DockerPortConflictContainer(name="container-a"),
+                        DockerPortConflictContainer(name="container-b"),
+                    ]
+                )
+            ]
+        )
+
+        assert len(conflicts.lanPorts) == 1
+        assert len(conflicts.lanPorts[0].containers) == 2
+        assert conflicts.lanPorts[0].containers[0].name == "container-a"
+
+    def test_port_conflicts_empty(self) -> None:
+        """Test DockerPortConflicts with no conflicts."""
+        from unraid_api.models import DockerPortConflicts
+
+        conflicts = DockerPortConflicts()
+
+        assert conflicts.lanPorts == []
+
+
+class TestKeyFile:
+    """Tests for KeyFile model."""
+
+    def test_key_file_with_data(self) -> None:
+        """Test KeyFile with location and contents."""
+        from unraid_api.models import KeyFile
+
+        key_file = KeyFile(
+            location="/boot/config/Plus.key",
+            contents="--- KEY FILE CONTENTS ---",
+        )
+
+        assert key_file.location == "/boot/config/Plus.key"
+        assert key_file.contents == "--- KEY FILE CONTENTS ---"
+
+    def test_key_file_defaults(self) -> None:
+        """Test KeyFile with default values."""
+        from unraid_api.models import KeyFile
+
+        key_file = KeyFile()
+
+        assert key_file.location is None
+        assert key_file.contents is None
+
+
+class TestExtendedArrayDisk:
+    """Tests for new ArrayDisk fields (v4.30.0)."""
+
+    def test_disk_with_extended_fields(self) -> None:
+        """Test ArrayDisk with new v4.30.0 fields."""
+        disk = ArrayDisk(
+            id="disk:1",
+            idx=1,
+            name="Disk 1",
+            rotational=True,
+            numReads=123456,
+            numWrites=78901,
+            numErrors=0,
+            warning=40,
+            critical=50,
+            color="green-on",
+            format="MBR: 4KiB-aligned",
+            transport="sata",
+            comment="Main storage",
+            exportable=True,
+        )
+
+        assert disk.rotational is True
+        assert disk.numReads == 123456
+        assert disk.numWrites == 78901
+        assert disk.numErrors == 0
+        assert disk.warning == 40
+        assert disk.critical == 50
+        assert disk.color == "green-on"
+        assert disk.format == "MBR: 4KiB-aligned"
+        assert disk.transport == "sata"
+        assert disk.comment == "Main storage"
+        assert disk.exportable is True
+
+    def test_disk_extended_fields_default_none(self) -> None:
+        """Test new fields default to None."""
+        disk = ArrayDisk(id="disk:1")
+
+        assert disk.rotational is None
+        assert disk.numReads is None
+        assert disk.numWrites is None
+        assert disk.numErrors is None
+        assert disk.warning is None
+        assert disk.critical is None
+        assert disk.color is None
+        assert disk.format is None
+        assert disk.transport is None
+        assert disk.comment is None
+        assert disk.exportable is None
+
+
+class TestExtendedShare:
+    """Tests for new Share fields (v4.30.0)."""
+
+    def test_share_with_extended_fields(self) -> None:
+        """Test Share with new v4.30.0 fields."""
+        share = Share(
+            id="share:appdata",
+            name="appdata",
+            size=1000,
+            used=400,
+            free=600,
+            cache="prefer",
+            include=["disk1", "disk2"],
+            exclude=["disk3"],
+            nameOrig="appdata",
+            allocator="highwater",
+            splitLevel="0",
+            floor="0",
+            cow="auto",
+            color="green-on",
+            luksStatus="0",
+        )
+
+        assert share.cache == "prefer"
+        assert share.include == ["disk1", "disk2"]
+        assert share.exclude == ["disk3"]
+        assert share.nameOrig == "appdata"
+        assert share.allocator == "highwater"
+        assert share.splitLevel == "0"
+        assert share.floor == "0"
+        assert share.cow == "auto"
+        assert share.color == "green-on"
+        assert share.luksStatus == "0"
+
+    def test_share_extended_fields_default_none(self) -> None:
+        """Test new share fields default to None."""
+        share = Share(id="share:test", name="test")
+
+        assert share.cache is None
+        assert share.include is None
+        assert share.exclude is None
+        assert share.nameOrig is None
+        assert share.allocator is None
+
+
+class TestDockerContainerStats:
+    """Tests for DockerContainerStats model (subscription-only)."""
+
+    def test_stats_with_all_fields(self) -> None:
+        """Test DockerContainerStats with all fields populated."""
+        from unraid_api.models import DockerContainerStats
+
+        stats = DockerContainerStats(
+            id="container:abc123",
+            cpuPercent=15.3,
+            memUsage="256MB / 2GB",
+            memPercent=12.5,
+            netIO="1.2GB / 500MB",
+            blockIO="50MB / 100MB",
+        )
+        assert stats.id == "container:abc123"
+        assert stats.cpuPercent == 15.3
+        assert stats.memUsage == "256MB / 2GB"
+        assert stats.memPercent == 12.5
+        assert stats.netIO == "1.2GB / 500MB"
+        assert stats.blockIO == "50MB / 100MB"
+
+    def test_stats_defaults_none(self) -> None:
+        """Test DockerContainerStats defaults to None."""
+        from unraid_api.models import DockerContainerStats
+
+        stats = DockerContainerStats()
+        assert stats.id is None
+        assert stats.cpuPercent is None
+        assert stats.memUsage is None
+        assert stats.memPercent is None
+        assert stats.netIO is None
+        assert stats.blockIO is None
+
+
+class TestExtendedDockerContainer:
+    """Tests for new DockerContainer fields (v4.30.0)."""
+
+    def test_container_with_extended_fields(self) -> None:
+        """Test DockerContainer with new v4.30.0 fields."""
+        from unraid_api.models import ContainerTemplatePort, TailscaleStatus
+
+        container = DockerContainer(
+            id="container:abc123",
+            name="plex",
+            state="RUNNING",
+            sizeRw=1024,
+            sizeLog=512,
+            autoStartOrder=1,
+            autoStartWait=5,
+            shell="bash",
+            templatePath="/boot/config/plugins/dockerMan/templates-user/my-plex.xml",
+            projectUrl="https://plex.tv",
+            registryUrl="https://hub.docker.com/r/plexinc/pms-docker",
+            supportUrl="https://forums.plex.tv",
+            tailscaleEnabled=True,
+            tailscaleStatus=TailscaleStatus(
+                hostname="plex",
+                dnsName="plex.tail12345.ts.net.",
+                online=True,
+            ),
+            isRebuildReady=False,
+            templatePorts=[
+                ContainerTemplatePort(
+                    ip="0.0.0.0", privatePort=32400, publicPort=32400, type="tcp"
+                )
+            ],
+            lanIpPorts=["32400/tcp"],
+        )
+
+        assert container.sizeRw == 1024
+        assert container.sizeLog == 512
+        assert container.autoStartOrder == 1
+        assert container.autoStartWait == 5
+        assert container.shell == "bash"
+        assert container.templatePath is not None
+        assert container.projectUrl == "https://plex.tv"
+        assert container.tailscaleEnabled is True
+        assert container.tailscaleStatus is not None
+        assert container.tailscaleStatus.hostname == "plex"
+        assert container.tailscaleStatus.online is True
+        assert container.isRebuildReady is False
+        assert container.templatePorts is not None
+        assert len(container.templatePorts) == 1
+        assert container.lanIpPorts == ["32400/tcp"]
+
+    def test_from_api_response_with_extended_fields(self) -> None:
+        """Test from_api_response with new v4.30.0 fields."""
+        data = {
+            "id": "container:abc123",
+            "names": ["/plex"],
+            "state": "RUNNING",
+            "status": "Up 5 days",
+            "image": "plexinc/pms-docker:latest",
+            "imageId": "sha256:abc",
+            "autoStart": True,
+            "sizeRw": 2048,
+            "sizeLog": 1024,
+            "autoStartOrder": 2,
+            "autoStartWait": 10,
+            "shell": "sh",
+            "templatePath": "/path/to/template.xml",
+            "projectUrl": "https://project.example.com",
+            "registryUrl": "https://registry.example.com",
+            "supportUrl": "https://support.example.com",
+            "tailscaleEnabled": False,
+            "tailscaleStatus": None,
+            "isRebuildReady": True,
+            "templatePorts": [
+                {
+                    "ip": "0.0.0.0",
+                    "privatePort": 8080,
+                    "publicPort": 8080,
+                    "type": "tcp",
+                }
+            ],
+            "lanIpPorts": ["8080/tcp", "443/tcp"],
+            "ports": [],
+        }
+
+        container = DockerContainer.from_api_response(data)
+
+        assert container.name == "plex"
+        assert container.sizeRw == 2048
+        assert container.sizeLog == 1024
+        assert container.autoStartOrder == 2
+        assert container.autoStartWait == 10
+        assert container.shell == "sh"
+        assert container.tailscaleEnabled is False
+        assert container.tailscaleStatus is None
+        assert container.isRebuildReady is True
+        assert container.templatePorts is not None
+        assert len(container.templatePorts) == 1
+        assert container.templatePorts[0].privatePort == 8080
+        assert container.lanIpPorts == ["8080/tcp", "443/tcp"]
+
+    def test_from_api_response_with_tailscale_status(self) -> None:
+        """Test from_api_response with tailscale status data."""
+        data = {
+            "id": "container:abc123",
+            "names": ["/test"],
+            "tailscaleEnabled": True,
+            "tailscaleStatus": {
+                "hostname": "my-container",
+                "dnsName": "my-container.ts.net.",
+                "online": True,
+            },
+            "ports": [],
+        }
+
+        container = DockerContainer.from_api_response(data)
+
+        assert container.tailscaleEnabled is True
+        assert container.tailscaleStatus is not None
+        assert container.tailscaleStatus.hostname == "my-container"
+        assert container.tailscaleStatus.online is True
+
+
+class TestExtendedRegistration:
+    """Tests for new Registration fields (v4.30.0)."""
+
+    def test_registration_with_key_file(self) -> None:
+        """Test Registration with keyFile field."""
+        from unraid_api.models import KeyFile, Registration
+
+        reg = Registration(
+            id="reg:1",
+            type="Pro",
+            state="valid",
+            keyFile=KeyFile(
+                location="/boot/config/Pro.key",
+                contents="key contents here",
+            ),
+        )
+
+        assert reg.type == "Pro"
+        assert reg.keyFile is not None
+        assert reg.keyFile.location == "/boot/config/Pro.key"
+
+    def test_registration_key_file_default_none(self) -> None:
+        """Test Registration keyFile defaults to None."""
+        from unraid_api.models import Registration
+
+        reg = Registration(id="reg:1")
+
+        assert reg.keyFile is None
+
+
+class TestExtendedUnraidArray:
+    """Tests for new UnraidArray fields (v4.30.0)."""
+
+    def test_array_with_boot_devices(self) -> None:
+        """Test UnraidArray with bootDevices field."""
+        array = UnraidArray(
+            state="STARTED",
+            capacity=ArrayCapacity(),
+            bootDevices=[
+                ArrayDisk(id="boot:1", name="Boot Device 1"),
+            ],
+        )
+
+        assert len(array.bootDevices) == 1
+        assert array.bootDevices[0].name == "Boot Device 1"
+
+    def test_array_boot_devices_default_empty(self) -> None:
+        """Test UnraidArray bootDevices defaults to empty list."""
+        array = UnraidArray(capacity=ArrayCapacity())
+
+        assert array.bootDevices == []
+
+
+class TestExtendedVars:
+    """Tests for new Vars fields (v4.30.0)."""
+
+    def test_vars_with_new_fields(self) -> None:
+        """Test Vars with new v4.30.0 fields."""
+        from unraid_api.models import Vars
+
+        vars_data = Vars(
+            sbVersion="1.0",
+            joinStatus="JOINED",
+            pollAttributesStatus="ACTIVE",
+        )
+
+        assert vars_data.sb_version == "1.0"
+        assert vars_data.join_status == "JOINED"
+        assert vars_data.poll_attributes_status == "ACTIVE"
+
+    def test_vars_new_fields_default_none(self) -> None:
+        """Test new Vars fields default to None."""
+        from unraid_api.models import Vars
+
+        vars_data = Vars()
+
+        assert vars_data.sb_version is None
+        assert vars_data.join_status is None
+        assert vars_data.poll_attributes_status is None
+
+
+class TestCpuMetrics:
+    """Tests for CpuMetrics and CpuCore subscription models."""
+
+    def test_cpu_metrics_with_all_fields(self) -> None:
+        """Test CpuMetrics with cores."""
+        from unraid_api.models import CpuCore, CpuMetrics
+
+        metrics = CpuMetrics(
+            percentTotal=45.2,
+            cpus=[CpuCore(percentTotal=50.0), CpuCore(percentTotal=40.4)],
+        )
+        assert metrics.percentTotal == 45.2
+        assert len(metrics.cpus) == 2
+        assert metrics.cpus[0].percentTotal == 50.0
+        assert metrics.cpus[1].percentTotal == 40.4
+
+    def test_cpu_metrics_defaults(self) -> None:
+        """Test CpuMetrics defaults."""
+        from unraid_api.models import CpuMetrics
+
+        metrics = CpuMetrics()
+        assert metrics.percentTotal is None
+        assert metrics.cpus == []
+
+    def test_cpu_core_defaults(self) -> None:
+        """Test CpuCore defaults."""
+        from unraid_api.models import CpuCore
+
+        core = CpuCore()
+        assert core.percentTotal is None
+
+
+class TestCpuTelemetryMetrics:
+    """Tests for CpuTelemetryMetrics subscription model."""
+
+    def test_telemetry_with_all_fields(self) -> None:
+        """Test CpuTelemetryMetrics with all fields."""
+        from unraid_api.models import CpuTelemetryMetrics
+
+        metrics = CpuTelemetryMetrics(totalPower=125.5, power=110.0, temp=65.0)
+        assert metrics.totalPower == 125.5
+        assert metrics.power == 110.0
+        assert metrics.temp == 65.0
+
+    def test_telemetry_defaults(self) -> None:
+        """Test CpuTelemetryMetrics defaults."""
+        from unraid_api.models import CpuTelemetryMetrics
+
+        metrics = CpuTelemetryMetrics()
+        assert metrics.totalPower is None
+        assert metrics.power is None
+        assert metrics.temp is None
+
+    def test_telemetry_with_list_values(self) -> None:
+        """Test CpuTelemetryMetrics with list values (real server format)."""
+        from unraid_api.models import CpuTelemetryMetrics
+
+        metrics = CpuTelemetryMetrics(totalPower=125.5, power=[0.7], temp=[35])
+        assert metrics.totalPower == 125.5
+        assert metrics.power == [0.7]
+        assert metrics.temp == [35]
+
+
+class TestMemoryMetrics:
+    """Tests for MemoryMetrics subscription model."""
+
+    def test_memory_metrics_with_all_fields(self) -> None:
+        """Test MemoryMetrics with all fields."""
+        from unraid_api.models import MemoryMetrics
+
+        metrics = MemoryMetrics(
+            total=16777216, used=8388608, free=8388608, percentTotal=50.0
+        )
+        assert metrics.total == 16777216
+        assert metrics.used == 8388608
+        assert metrics.free == 8388608
+        assert metrics.percentTotal == 50.0
+
+    def test_memory_metrics_defaults(self) -> None:
+        """Test MemoryMetrics defaults."""
+        from unraid_api.models import MemoryMetrics
+
+        metrics = MemoryMetrics()
+        assert metrics.total is None
+        assert metrics.used is None
+        assert metrics.free is None
+        assert metrics.percentTotal is None
+
+
+class TestArraySubscriptionUpdate:
+    """Tests for ArraySubscriptionUpdate subscription model."""
+
+    def test_update_with_all_fields(self) -> None:
+        """Test ArraySubscriptionUpdate with capacity."""
+        from unraid_api.models import (
+            ArrayCapacity,
+            ArraySubscriptionUpdate,
+            CapacityKilobytes,
+        )
+
+        update = ArraySubscriptionUpdate(
+            state="STARTED",
+            capacity=ArrayCapacity(
+                kilobytes=CapacityKilobytes(total=1000000, used=500000, free=500000)
+            ),
+        )
+        assert update.state == "STARTED"
+        assert update.capacity is not None
+        assert update.capacity.kilobytes.total == 1000000
+
+    def test_update_defaults(self) -> None:
+        """Test ArraySubscriptionUpdate defaults."""
+        from unraid_api.models import ArraySubscriptionUpdate
+
+        update = ArraySubscriptionUpdate()
+        assert update.state is None
+        assert update.capacity is None

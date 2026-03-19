@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import uuid
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
@@ -18,17 +20,26 @@ from unraid_api.exceptions import (
 
 if TYPE_CHECKING:
     import ssl
+    from collections.abc import AsyncGenerator
     from types import TracebackType
 
     from unraid_api.models import (
         ApiKey,
+        ArraySubscriptionUpdate,
         Cloud,
         Connect,
+        ContainerUpdateStatus,
+        CpuMetrics,
+        CpuTelemetryMetrics,
+        DisplaySettings,
         DockerContainer,
         DockerContainerLogs,
+        DockerContainerStats,
         DockerNetwork,
+        DockerPortConflicts,
         Flash,
         LogFile,
+        MemoryMetrics,
         NotificationOverview,
         Owner,
         ParityHistoryEntry,
@@ -40,6 +51,7 @@ if TYPE_CHECKING:
         Share,
         SystemMetrics,
         UnraidArray,
+        UPSConfiguration,
         UPSDevice,
         UserAccount,
         Vars,
@@ -465,6 +477,217 @@ class UnraidClient:
         """
         return await self.query(mutation, variables)
 
+    def _get_ws_url(self) -> str:
+        """Derive WebSocket URL from the resolved HTTP URL.
+
+        Returns:
+            WebSocket URL (ws:// or wss://).
+
+        Raises:
+            UnraidConnectionError: If the HTTP URL has not been resolved yet.
+
+        """
+        if self._resolved_url is None:
+            raise UnraidConnectionError(
+                "HTTP URL not resolved yet. Call a query or test_connection first."
+            )
+        url = self._resolved_url
+        if url.startswith("https://"):
+            return "wss://" + url[len("https://") :]
+        if url.startswith("http://"):
+            return "ws://" + url[len("http://") :]
+        return url
+
+    async def _ensure_resolved_url(self) -> None:
+        """Ensure the HTTP URL is resolved (session + redirect discovery)."""
+        if self._session is None:
+            await self._create_session()
+        if self._session is None:
+            raise UnraidConnectionError("Failed to create HTTP session")
+        if self._resolved_url is None:
+            redirect_url, use_ssl = await self._discover_redirect_url()
+            if redirect_url:
+                self._resolved_url = redirect_url
+            else:
+                clean_host = self._get_clean_host()
+                if use_ssl:
+                    protocol = "https"
+                    port_suffix = (
+                        f":{self.https_port}"
+                        if self.https_port != DEFAULT_HTTPS_PORT
+                        else ""
+                    )
+                else:
+                    protocol = "http"
+                    port_suffix = (
+                        f":{self.http_port}"
+                        if self.http_port != DEFAULT_HTTP_PORT
+                        else ""
+                    )
+                self._resolved_url = f"{protocol}://{clean_host}{port_suffix}/graphql"
+
+    async def _ws_connect_and_init(
+        self,
+        ws_url: str,
+        headers: dict[str, str],
+    ) -> aiohttp.ClientWebSocketResponse:
+        """Open a WebSocket and perform the graphql-transport-ws handshake."""
+        assert self._session is not None  # noqa: S101
+        try:
+            ws = await self._session.ws_connect(
+                ws_url,
+                protocols=["graphql-transport-ws"],
+                headers=headers,
+            )
+        except TimeoutError as err:
+            raise UnraidTimeoutError(f"WebSocket connection timed out: {err}") from err
+        except aiohttp.ClientSSLError as err:
+            raise UnraidSSLError("SSL certificate verification failed") from err
+        except aiohttp.ClientError as err:
+            raise UnraidConnectionError(f"WebSocket connection failed: {err}") from err
+
+        # --- connection_init ---
+        await ws.send_str(
+            json.dumps(
+                {
+                    "type": "connection_init",
+                    "payload": {"x-api-key": self._api_key},
+                }
+            )
+        )
+
+        # --- wait for connection_ack ---
+        ack_msg = await ws.receive()
+        if ack_msg.type in (
+            aiohttp.WSMsgType.CLOSE,
+            aiohttp.WSMsgType.CLOSING,
+            aiohttp.WSMsgType.CLOSED,
+        ):
+            raise UnraidConnectionError(
+                "WebSocket closed during connection_init handshake"
+            )
+        if ack_msg.type == aiohttp.WSMsgType.ERROR:
+            raise UnraidConnectionError(
+                f"WebSocket error during handshake: {ws.exception()}"
+            )
+        ack_data = json.loads(ack_msg.data)
+        if ack_data.get("type") != "connection_ack":
+            msg_type = ack_data.get("type", "unknown")
+            if msg_type == "connection_error":
+                payload = ack_data.get("payload", {})
+                raise UnraidAuthenticationError(f"Connection rejected: {payload}")
+            raise UnraidConnectionError(f"Expected connection_ack, got: {msg_type}")
+        return ws
+
+    async def subscribe(
+        self,
+        subscription: str,
+        variables: dict[str, Any] | None = None,
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        """Execute a GraphQL subscription over WebSocket.
+
+        Uses the ``graphql-transport-ws`` protocol. The returned async
+        generator yields each ``next`` payload's ``data`` dict. The
+        generator cleans up the WebSocket connection when exhausted or
+        when the caller breaks out of the iteration.
+
+        Args:
+            subscription: GraphQL subscription query string.
+            variables: Optional subscription variables.
+
+        Yields:
+            Response data dictionaries for each subscription event.
+
+        Raises:
+            UnraidConnectionError: On WebSocket connection or protocol errors.
+            UnraidAuthenticationError: On authentication failures.
+            UnraidTimeoutError: On connection timeout.
+
+        Example::
+
+            async for stats in client.subscribe(
+                'subscription { dockerContainerStats { id cpuPercent } }'
+            ):
+                print(stats)
+
+        """
+        await self._ensure_resolved_url()
+        if self._session is None:  # pragma: no cover
+            err_msg = "Session not initialized"
+            raise UnraidConnectionError(err_msg)
+
+        ws_url = self._get_ws_url()
+        headers = {"x-api-key": self._api_key}
+        sub_id = uuid.uuid4().hex[:8]
+
+        ws: aiohttp.ClientWebSocketResponse | None = None
+        try:
+            ws = await self._ws_connect_and_init(ws_url, headers)
+
+            # --- subscribe ---
+            subscribe_payload: dict[str, Any] = {"query": subscription}
+            if variables:
+                subscribe_payload["variables"] = variables
+
+            await ws.send_str(
+                json.dumps(
+                    {
+                        "id": sub_id,
+                        "type": "subscribe",
+                        "payload": subscribe_payload,
+                    }
+                )
+            )
+
+            # --- receive loop ---
+            while True:
+                msg = await ws.receive()
+
+                if msg.type == aiohttp.WSMsgType.TEXT:
+                    data = json.loads(msg.data)
+                    msg_type = data.get("type")
+
+                    if msg_type == "next":
+                        payload = data.get("payload", {})
+                        if "errors" in payload and "data" not in payload:
+                            errors = payload["errors"]
+                            error_msgs = [e.get("message", str(e)) for e in errors]
+                            raise UnraidAPIError(
+                                f"Subscription error: {'; '.join(error_msgs)}",
+                                errors=errors,
+                            )
+                        yield payload.get("data") or {}
+
+                    elif msg_type == "error":
+                        errors = data.get("payload", [])
+                        error_msgs = [e.get("message", str(e)) for e in errors]
+                        raise UnraidAPIError(
+                            f"Subscription error: {'; '.join(error_msgs)}",
+                            errors=errors,
+                        )
+
+                    elif msg_type == "complete":
+                        return
+
+                elif msg.type in (
+                    aiohttp.WSMsgType.CLOSE,
+                    aiohttp.WSMsgType.CLOSING,
+                    aiohttp.WSMsgType.CLOSED,
+                ):
+                    return
+
+                elif msg.type == aiohttp.WSMsgType.ERROR:
+                    raise UnraidConnectionError(f"WebSocket error: {ws.exception()}")
+
+        finally:
+            if ws is not None and not ws.closed:
+                # Tell the server we're done with this subscription
+                try:
+                    await ws.send_str(json.dumps({"id": sub_id, "type": "complete"}))
+                except Exception:
+                    _LOGGER.debug("Error sending complete message", exc_info=True)
+                await ws.close()
+
     # =========================================================================
     # Connection & Info Methods
     # =========================================================================
@@ -632,8 +855,27 @@ class UnraidClient:
                         status
                         autoStart
                         isUpdateAvailable
+                        isOrphaned
                         webUiUrl
                         iconUrl
+                        command
+                        created
+                        sizeRootFs
+                        sizeRw
+                        sizeLog
+                        autoStartOrder
+                        autoStartWait
+                        shell
+                        templatePath
+                        projectUrl
+                        registryUrl
+                        supportUrl
+                        tailscaleEnabled
+                        tailscaleStatus { hostname dnsName online }
+                        isRebuildReady
+                        templatePorts { ip privatePort publicPort type }
+                        lanIpPorts
+                        hostConfig { networkMode }
                         ports { ip privatePort publicPort type }
                     }
                 }
@@ -708,7 +950,10 @@ class UnraidClient:
                     model
                     status
                     battery { chargeLevel estimatedRuntime health }
-                    power { inputVoltage outputVoltage loadPercentage }
+                    power {
+                        inputVoltage outputVoltage loadPercentage
+                        nominalPower currentPower
+                    }
                 }
             }
         """
@@ -747,19 +992,26 @@ class UnraidClient:
                         id name device size temp type
                         fsSize fsUsed fsFree fsType
                     }
+                    bootDevices {
+                        id name device size status type temp
+                        fsSize fsUsed fsFree fsType
+                    }
                     parities {
                         id idx name device size status type temp
-                        isSpinning
+                        isSpinning rotational numReads numWrites numErrors
+                        warning critical color format transport comment exportable
                     }
                     disks {
                         id idx name device size status type temp
                         fsSize fsFree fsUsed fsType
-                        isSpinning
+                        isSpinning rotational numReads numWrites numErrors
+                        warning critical color format transport comment exportable
                     }
                     caches {
                         id idx name device size status type temp
                         fsSize fsFree fsUsed fsType
-                        isSpinning
+                        isSpinning rotational numReads numWrites numErrors
+                        warning critical color format transport comment exportable
                     }
                 }
             }
@@ -776,6 +1028,7 @@ class UnraidClient:
             capacity=array_data.get("capacity", {}),
             parityCheckStatus=array_data.get("parityCheckStatus", {}),
             boot=boot,
+            bootDevices=[ArrayDisk(**d) for d in (array_data.get("bootDevices") or [])],
             parities=[ArrayDisk(**d) for d in (array_data.get("parities") or [])],
             disks=[ArrayDisk(**d) for d in (array_data.get("disks") or [])],
             caches=[ArrayDisk(**d) for d in (array_data.get("caches") or [])],
@@ -798,12 +1051,137 @@ class UnraidClient:
                     free
                     used
                     size
+                    cache
+                    include
+                    exclude
+                    nameOrig
+                    allocator
+                    splitLevel
+                    floor
+                    cow
+                    color
+                    luksStatus
                 }
             }
         """
         result = await self.query(query_str)
         shares = result.get("shares", []) or []
         return [Share(**s) for s in shares]
+
+    async def get_container_update_statuses(self) -> list[ContainerUpdateStatus]:
+        """Get update statuses for all Docker containers.
+
+        Returns:
+            List of ContainerUpdateStatus models with name and update status.
+
+        """
+        from unraid_api.models import ContainerUpdateStatus
+
+        query_str = """
+            query {
+                docker {
+                    containerUpdateStatuses {
+                        name
+                        updateStatus
+                    }
+                }
+            }
+        """
+        result = await self.query(query_str)
+        statuses = result.get("docker", {}).get("containerUpdateStatuses", []) or []
+        return [ContainerUpdateStatus(**s) for s in statuses]
+
+    async def get_ups_configuration(self) -> UPSConfiguration:
+        """Get UPS configuration settings.
+
+        Returns:
+            UPSConfiguration model with UPS settings.
+
+        """
+        from unraid_api.models import UPSConfiguration
+
+        query_str = """
+            query {
+                upsConfiguration {
+                    service
+                    upsCable
+                    customUpsCable
+                    upsType
+                    device
+                    overrideUpsCapacity
+                    batteryLevel
+                    minutes
+                    timeout
+                    killUps
+                    nisIp
+                    netServer
+                    upsName
+                    modelName
+                }
+            }
+        """
+        result = await self.query(query_str)
+        config_data = result.get("upsConfiguration", {}) or {}
+        return UPSConfiguration(**config_data)
+
+    async def get_display_settings(self) -> DisplaySettings:
+        """Get display and temperature settings.
+
+        Returns:
+            DisplaySettings model with theme, temperature units, and thresholds.
+
+        """
+        from unraid_api.models import DisplaySettings
+
+        query_str = """
+            query {
+                info {
+                    display {
+                        theme
+                        unit
+                        scale
+                        tabs
+                        resize
+                        wwn
+                        total
+                        usage
+                        text
+                        warning
+                        critical
+                        hot
+                        max
+                        locale
+                    }
+                }
+            }
+        """
+        result = await self.query(query_str)
+        display_data = result.get("info", {}).get("display", {}) or {}
+        return DisplaySettings(**display_data)
+
+    async def get_docker_port_conflicts(self) -> DockerPortConflicts:
+        """Get Docker port conflict information.
+
+        Returns:
+            DockerPortConflicts model with LAN port conflicts.
+
+        """
+        from unraid_api.models import DockerPortConflicts
+
+        query_str = """
+            query {
+                docker {
+                    portConflicts {
+                        lanPorts {
+                            containers { name }
+                        }
+                    }
+                }
+            }
+        """
+        result = await self.query(query_str)
+        conflicts_data = result.get("docker", {}).get("portConflicts", {}) or {}
+        return DockerPortConflicts(**conflicts_data)
 
     async def get_notification_overview(self) -> NotificationOverview:
         """Get notification overview as Pydantic model.
@@ -1184,6 +1562,26 @@ class UnraidClient:
                         autoStart
                         command
                         created
+                        isUpdateAvailable
+                        isOrphaned
+                        webUiUrl
+                        iconUrl
+                        sizeRootFs
+                        sizeRw
+                        sizeLog
+                        autoStartOrder
+                        autoStartWait
+                        shell
+                        templatePath
+                        projectUrl
+                        registryUrl
+                        supportUrl
+                        tailscaleEnabled
+                        tailscaleStatus { hostname dnsName online }
+                        isRebuildReady
+                        templatePorts { ip privatePort publicPort type }
+                        lanIpPorts
+                        hostConfig { networkMode }
                         ports { ip privatePort publicPort type }
                     }
                 }
@@ -1419,19 +1817,26 @@ class UnraidClient:
                         id name device size temp type
                         fsSize fsUsed fsFree fsType
                     }
+                    bootDevices {
+                        id name device size status type temp
+                        fsSize fsUsed fsFree fsType
+                    }
                     parities {
                         id idx name device size status type temp
-                        isSpinning
+                        isSpinning rotational numReads numWrites numErrors
+                        warning critical color format transport comment exportable
                     }
                     disks {
                         id idx name device size status type temp
                         fsSize fsFree fsUsed fsType
-                        isSpinning
+                        isSpinning rotational numReads numWrites numErrors
+                        warning critical color format transport comment exportable
                     }
                     caches {
                         id idx name device size status type temp
                         fsSize fsFree fsUsed fsType
-                        isSpinning
+                        isSpinning rotational numReads numWrites numErrors
+                        warning critical color format transport comment exportable
                     }
                 }
             }
@@ -1462,6 +1867,13 @@ class UnraidClient:
                     comment
                     include
                     exclude
+                    nameOrig
+                    allocator
+                    splitLevel
+                    floor
+                    cow
+                    color
+                    luksStatus
                 }
             }
         """
@@ -1495,6 +1907,8 @@ class UnraidClient:
                         inputVoltage
                         outputVoltage
                         loadPercentage
+                        nominalPower
+                        currentPower
                     }
                 }
             }
@@ -1674,16 +2088,26 @@ class UnraidClient:
                         id name device size status type temp
                         fsSize fsUsed fsFree fsType
                     }
+                    bootDevices {
+                        id name device size status type temp
+                        fsSize fsUsed fsFree fsType
+                    }
                     disks {
                         id idx name device size status type temp
                         fsSize fsUsed fsFree fsType isSpinning
+                        rotational numReads numWrites numErrors
+                        warning critical color format transport comment exportable
                     }
                     parities {
                         id idx name device size status type temp isSpinning
+                        rotational numReads numWrites numErrors
+                        warning critical color format transport comment exportable
                     }
                     caches {
                         id idx name device size status type temp
                         fsSize fsUsed fsFree fsType isSpinning
+                        rotational numReads numWrites numErrors
+                        warning critical color format transport comment exportable
                     }
                 }
             }
@@ -1692,6 +2116,7 @@ class UnraidClient:
         array_data = result.get("array", {})
         return {
             "boot": array_data.get("boot"),
+            "bootDevices": list(array_data.get("bootDevices", [])),
             "disks": list(array_data.get("disks", [])),
             "parities": list(array_data.get("parities", [])),
             "caches": list(array_data.get("caches", [])),
@@ -1745,6 +2170,7 @@ class UnraidClient:
                     state
                     expiration
                     updateExpiration
+                    keyFile { location contents }
                 }
             }
         """
@@ -1841,6 +2267,9 @@ class UnraidClient:
                     mdResyncPos
                     mdState
                     mdVersion
+                    sbVersion
+                    joinStatus
+                    pollAttributesStatus
                     cacheNumDevices
                     fsState
                     fsProgress
@@ -2694,3 +3123,153 @@ class UnraidClient:
             }
         """
         return await self.mutate(mutation, {"input": {"ids": key_ids}})
+
+    # =========================================================================
+    # Subscription Methods (WebSocket)
+    # =========================================================================
+
+    async def subscribe_container_stats(
+        self,
+    ) -> AsyncGenerator[DockerContainerStats, None]:
+        """Subscribe to live Docker container resource statistics.
+
+        Yields DockerContainerStats models with CPU, memory, network,
+        and block I/O metrics for all running containers.
+
+        Yields:
+            DockerContainerStats for each update event.
+
+        """
+        from unraid_api.models import DockerContainerStats
+
+        subscription = """
+            subscription {
+                dockerContainerStats {
+                    id cpuPercent memUsage memPercent netIO blockIO
+                }
+            }
+        """
+        async for data in self.subscribe(subscription):
+            stats_data = data.get("dockerContainerStats", {})
+            yield DockerContainerStats(**stats_data)
+
+    async def subscribe_cpu_metrics(self) -> AsyncGenerator[CpuMetrics, None]:
+        """Subscribe to live CPU utilization metrics.
+
+        Yields CpuMetrics models with overall and per-core CPU percentages.
+
+        Yields:
+            CpuMetrics for each update event.
+
+        """
+        from unraid_api.models import CpuMetrics
+
+        subscription = """
+            subscription {
+                systemMetricsCpu {
+                    percentTotal
+                    cpus { percentTotal }
+                }
+            }
+        """
+        async for data in self.subscribe(subscription):
+            cpu_data = data.get("systemMetricsCpu", {})
+            yield CpuMetrics(**cpu_data)
+
+    async def subscribe_cpu_telemetry(
+        self,
+    ) -> AsyncGenerator[CpuTelemetryMetrics, None]:
+        """Subscribe to CPU telemetry (power and temperature).
+
+        Yields CpuTelemetryMetrics models with power consumption
+        and temperature readings.
+
+        Yields:
+            CpuTelemetryMetrics for each update event.
+
+        """
+        from unraid_api.models import CpuTelemetryMetrics
+
+        subscription = """
+            subscription {
+                systemMetricsCpuTelemetry {
+                    totalPower power temp
+                }
+            }
+        """
+        async for data in self.subscribe(subscription):
+            telemetry_data = data.get("systemMetricsCpuTelemetry", {})
+            yield CpuTelemetryMetrics(**telemetry_data)
+
+    async def subscribe_memory_metrics(
+        self,
+    ) -> AsyncGenerator[MemoryMetrics, None]:
+        """Subscribe to live memory utilization metrics.
+
+        Yields MemoryMetrics models with total, used, free memory
+        and percentage.
+
+        Yields:
+            MemoryMetrics for each update event.
+
+        """
+        from unraid_api.models import MemoryMetrics
+
+        subscription = """
+            subscription {
+                systemMetricsMemory {
+                    total used free percentTotal
+                }
+            }
+        """
+        async for data in self.subscribe(subscription):
+            mem_data = data.get("systemMetricsMemory", {})
+            yield MemoryMetrics(**mem_data)
+
+    async def subscribe_ups_updates(
+        self,
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        """Subscribe to UPS status updates.
+
+        Yields raw dictionaries with UPS state changes including
+        status and battery charge level.
+
+        Yields:
+            Dict with UPS update data for each event.
+
+        """
+        subscription = """
+            subscription {
+                upsUpdates {
+                    id status battery { chargeLevel }
+                }
+            }
+        """
+        async for data in self.subscribe(subscription):
+            yield data.get("upsUpdates", {})
+
+    async def subscribe_array_updates(
+        self,
+    ) -> AsyncGenerator[ArraySubscriptionUpdate, None]:
+        """Subscribe to array state changes.
+
+        Yields ArraySubscriptionUpdate models with array state
+        and capacity information.
+
+        Yields:
+            ArraySubscriptionUpdate for each state change event.
+
+        """
+        from unraid_api.models import ArraySubscriptionUpdate
+
+        subscription = """
+            subscription {
+                arraySubscription {
+                    state
+                    capacity { kilobytes { free used total } }
+                }
+            }
+        """
+        async for data in self.subscribe(subscription):
+            array_data = data.get("arraySubscription", {})
+            yield ArraySubscriptionUpdate(**array_data)

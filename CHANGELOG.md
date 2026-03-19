@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-03-19
+
+### Added
+
+- **Full support for Unraid API v4.30.0/v4.30.1 features** (Unraid 7.2.4+)
+- **New client methods:**
+  - `get_container_update_statuses()` — query Docker container update availability as `list[ContainerUpdateStatus]`
+  - `get_ups_configuration()` — query UPS hardware/software configuration as `UPSConfiguration`
+  - `get_display_settings()` — query display and temperature threshold settings as `DisplaySettings`
+  - `get_docker_port_conflicts()` — query Docker LAN port conflicts as `DockerPortConflicts`
+- **WebSocket GraphQL subscription support** — real-time streaming for subscription-only API endpoints using the `graphql-transport-ws` protocol
+- **Generic `subscribe()` async generator** — low-level method for any GraphQL subscription with full protocol handling (connection_init/ack, subscribe/next/error/complete)
+- **6 typed subscription methods:**
+  - `subscribe_container_stats(container_id)` → yields `DockerContainerStats` for real-time Docker container resource metrics
+  - `subscribe_cpu_metrics()` → yields `CpuMetrics` for CPU usage per-core and total
+  - `subscribe_cpu_telemetry()` → yields `CpuTelemetryMetrics` for CPU power and temperature
+  - `subscribe_memory_metrics()` → yields `MemoryMetrics` for system memory usage
+  - `subscribe_ups_updates()` → yields raw `dict` for UPS state changes
+  - `subscribe_array_updates()` → yields `ArraySubscriptionUpdate` for array state and capacity changes
+- **New Pydantic models:**
+  - `ContainerUpdateStatus` — container name and update status (e.g., `UP_TO_DATE`, `UPDATE_AVAILABLE`)
+  - `UPSConfiguration` — full UPS config (cable, type, device, battery level, timeout, etc.)
+  - `DisplaySettings` — theme, temperature unit/thresholds, locale, and UI display toggles
+  - `DockerPortConflicts`, `DockerLanPortConflict`, `DockerPortConflictContainer` — port conflict hierarchy
+  - `TailscaleStatus` — Tailscale hostname, DNS name, and online status for containers
+  - `ContainerTemplatePort` — template port configuration (ip, privatePort, publicPort, type)
+  - `KeyFile` — registration key file location and contents
+  - `CpuCore`, `CpuMetrics`, `CpuTelemetryMetrics`, `MemoryMetrics`, `ArraySubscriptionUpdate` — subscription models
+- WebSocket URL auto-derivation from resolved HTTP URL (http→ws, https→wss)
+- UPS nominal and current power fields on `UPSPower` model: `nominalPower` (optional `int`) and `currentPower` (optional `float`)
+- Updated `get_ups_status()` and `typed_get_ups_devices()` GraphQL queries to fetch `nominalPower` and `currentPower`
+- **Extended `DockerContainer` fields:** `sizeRw`, `sizeLog`, `autoStartOrder`, `autoStartWait`, `shell`, `templatePath`, `projectUrl`, `registryUrl`, `supportUrl`, `tailscaleEnabled`, `tailscaleStatus`, `isRebuildReady`, `templatePorts`, `lanIpPorts`
+- **Extended `ArrayDisk` fields:** `rotational`, `numReads`, `numWrites`, `numErrors`, `warning`, `critical`, `color`, `format`, `transport`, `comment`, `exportable`
+- **Extended `Share` fields:** `cache`, `include`, `exclude`, `nameOrig`, `allocator`, `splitLevel`, `floor`, `cow`, `color`, `luksStatus`
+- **Extended `Vars` fields:** `sbVersion`, `joinStatus`, `pollAttributesStatus`
+- **Extended `Registration` model** with `keyFile` field (location and contents)
+- **Extended `UnraidArray` model** with `bootDevices` list
+
+### Fixed
+
+- **Fixed WebSocket subscription authentication** — `connection_init` payload sends `x-api-key` at the top level instead of nested under `headers`, fixing "Failed to validate session" CSRF errors
+- **Fixed `CpuTelemetryMetrics` model** — `power` and `temp` fields accept `list[float] | float | None` to match real server responses returning per-core values as lists
+- **Fixed subscription `next` messages with null data** — `subscribe()` handles `None` data payloads gracefully
+- **Error handling for GraphQL errors in subscription `next` payloads** — raises `UnraidAPIError` when server sends errors without data
+- **Fixed `DockerContainerStats` model** to match actual GraphQL schema — fields are now `id`, `cpuPercent`, `memUsage` (str), `memPercent`, `netIO` (str), `blockIO` (str)
+- Removed `stats` field from `DockerContainer` — container stats are only available via the `dockerContainerStats` GraphQL subscription
+
+### Changed
+
+- All GraphQL queries updated to fetch new v4.30.0 fields (`typed_get_containers`, `typed_get_array`, `typed_get_shares`, `get_containers`, `get_array_status`, `get_array_disks`, `get_shares`, `get_vars`, `get_registration`)
+
 ## [1.6.0] - 2026-02-24
 
 ### Added

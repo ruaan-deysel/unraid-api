@@ -6,7 +6,7 @@
 [![Coverage](https://codecov.io/gh/ruaan-deysel/unraid-api/branch/main/graph/badge.svg)](https://codecov.io/gh/ruaan-deysel/unraid-api)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-An async Python client library for the Unraid GraphQL API (v4.21.0+, Unraid 7.1.4+).
+An async Python client library for the Unraid GraphQL API.
 
 ## Features
 
@@ -120,6 +120,23 @@ async def setup_client(session: aiohttp.ClientSession):
     return client
 ```
 
+### Real-Time Subscriptions (WebSocket)
+
+```python
+async with UnraidClient(host, api_key) as client:
+    # Stream CPU metrics
+    async for cpu in client.subscribe_cpu_metrics():
+        print(f"CPU: {cpu.percentTotal}%")
+
+    # Stream Docker container stats
+    async for stats in client.subscribe_container_stats("container:plex"):
+        print(f"CPU: {stats.cpuPercent}%, Mem: {stats.memUsage}")
+
+    # Generic subscription with custom query
+    async for data in client.subscribe("subscription { arraySubscription { state } }"):
+        print(f"Array state: {data['state']}")
+```
+
 ## Pydantic Models
 
 Response data can be parsed into typed models:
@@ -199,6 +216,10 @@ async with UnraidClient(host, api_key) as client:
 | `typed_get_cloud()` | `Cloud` | Unraid Connect cloud status |
 | `typed_get_connect()` | `Connect` | Connect configuration |
 | `typed_get_remote_access()` | `RemoteAccess` | Remote access settings |
+| `get_container_update_statuses()` | `list[ContainerUpdateStatus]` | Docker container update availability |
+| `get_ups_configuration()` | `UPSConfiguration` | UPS hardware/software configuration |
+| `get_display_settings()` | `DisplaySettings` | Display and temperature settings |
+| `get_docker_port_conflicts()` | `DockerPortConflicts` | Docker LAN port conflicts |
 
 #### Raw Data Methods
 
@@ -239,6 +260,18 @@ async with UnraidClient(host, api_key) as client:
 | `spin_up_disk(id)` | Spin up disk |
 | `spin_down_disk(id)` | Spin down disk |
 
+#### Subscription Methods (WebSocket)
+
+| Method | Yields | Description |
+|--------|--------|-------------|
+| `subscribe(subscription, variables)` | `dict` | Generic GraphQL subscription (async generator) |
+| `subscribe_container_stats(container_id)` | `DockerContainerStats` | Real-time Docker container resource metrics |
+| `subscribe_cpu_metrics()` | `CpuMetrics` | CPU usage per-core and total |
+| `subscribe_cpu_telemetry()` | `CpuTelemetryMetrics` | CPU power and temperature |
+| `subscribe_memory_metrics()` | `MemoryMetrics` | System memory usage |
+| `subscribe_ups_updates()` | `dict` | UPS state changes (raw) |
+| `subscribe_array_updates()` | `ArraySubscriptionUpdate` | Array state and capacity changes |
+
 ### Models
 
 #### System Models
@@ -258,16 +291,23 @@ async with UnraidClient(host, api_key) as client:
 - `Share` - User share with usage
 
 #### Docker/VM Models
-- `DockerContainer` - Container with ports, state, mounts
+- `DockerContainer` - Container with ports, state, mounts, Tailscale, template ports
 - `DockerNetwork` - Docker network configuration
 - `VmDomain` - Virtual machine details
+- `TailscaleStatus` - Tailscale hostname, DNS name, and online status
+- `ContainerTemplatePort` - Template port configuration
+- `ContainerUpdateStatus` - Container update availability
+- `DockerPortConflicts` - Port conflict detection
 
 #### Service Models
 - `Service` - System service status
 - `UPSDevice` - UPS with battery/power info
+- `UPSConfiguration` - UPS hardware/software configuration
 - `Plugin` - Installed plugin info
 - `LogFile` - Log file metadata
 - `LogFileContent` - Log file contents
+- `DisplaySettings` - Display and temperature threshold settings
+- `KeyFile` - Registration key file location and contents
 
 #### Network Models
 - `Cloud` - Unraid Connect cloud status
@@ -277,6 +317,14 @@ async with UnraidClient(host, api_key) as client:
 #### Notification Models
 - `Notification` - System notification
 - `NotificationOverview` - Notification counts
+
+#### Subscription Models
+- `CpuCore` - Per-core CPU usage
+- `CpuMetrics` - CPU usage with per-core breakdown
+- `CpuTelemetryMetrics` - CPU power and temperature
+- `MemoryMetrics` - System memory total/used/free
+- `ArraySubscriptionUpdate` - Array state and capacity updates
+- `DockerContainerStats` - Real-time container resource metrics
 
 ### Exceptions
 
@@ -292,8 +340,8 @@ async with UnraidClient(host, api_key) as client:
 
 ## Requirements
 
-- Python 3.11+
-- Unraid 7.1.4+ with API 4.21.0+
+- Python 3.14+
+- Unraid 7.2.4+ with latest Unraid API
 - API key with appropriate permissions
 
 ## Development

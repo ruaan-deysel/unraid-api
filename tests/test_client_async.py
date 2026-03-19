@@ -1586,6 +1586,8 @@ class TestUpsMethod:
                                     "inputVoltage": 120.0,
                                     "outputVoltage": 120.0,
                                     "loadPercentage": 25.0,
+                                    "nominalPower": 1500,
+                                    "currentPower": 375.0,
                                 },
                             }
                         ]
@@ -1601,6 +1603,8 @@ class TestUpsMethod:
                 assert len(result) == 1
                 assert result[0]["name"] == "CyberPower CP1500"
                 assert result[0]["battery"]["chargeLevel"] == 100
+                assert result[0]["power"]["nominalPower"] == 1500
+                assert result[0]["power"]["currentPower"] == 375.0
 
 
 class TestNotificationsMethod:
@@ -2571,6 +2575,8 @@ class TestTypedGetUpsDevicesMethod:
                                     "inputVoltage": 120.5,
                                     "outputVoltage": 120.0,
                                     "loadPercentage": 25.0,
+                                    "nominalPower": 1500,
+                                    "currentPower": 375.0,
                                 },
                             }
                         ]
@@ -2591,6 +2597,8 @@ class TestTypedGetUpsDevicesMethod:
                 assert result[0].status == "OL"
                 assert result[0].battery.chargeLevel == 100
                 assert result[0].power.loadPercentage == 25.0
+                assert result[0].power.nominalPower == 1500
+                assert result[0].power.currentPower == 375.0
 
     async def test_typed_get_ups_devices_empty(self) -> None:
         """Test getting UPS devices returns empty list when none exist."""
@@ -4490,3 +4498,259 @@ class TestCheckCompatibility:
                 # Should not raise - just warns about unparseable versions
                 result = await client.check_compatibility()
                 assert result.unraid == "unknown"
+
+
+class TestGetContainerUpdateStatusesMethod:
+    """Tests for get_container_update_statuses method."""
+
+    async def test_get_container_update_statuses(self) -> None:
+        """Test getting container update statuses returns list of models."""
+        from unraid_api.models import ContainerUpdateStatus
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "docker": {
+                            "containerUpdateStatuses": [
+                                {
+                                    "name": "plex",
+                                    "updateStatus": "UP_TO_DATE",
+                                },
+                                {
+                                    "name": "sonarr",
+                                    "updateStatus": "UPDATE_AVAILABLE",
+                                },
+                            ]
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_container_update_statuses()
+
+                assert len(result) == 2
+                assert all(isinstance(s, ContainerUpdateStatus) for s in result)
+                assert result[0].name == "plex"
+                assert result[0].updateStatus == "UP_TO_DATE"
+                assert result[1].name == "sonarr"
+                assert result[1].updateStatus == "UPDATE_AVAILABLE"
+
+    async def test_get_container_update_statuses_empty(self) -> None:
+        """Test getting container update statuses with no containers."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={"data": {"docker": {"containerUpdateStatuses": []}}},
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_container_update_statuses()
+                assert result == []
+
+
+class TestGetUpsConfigurationMethod:
+    """Tests for get_ups_configuration method."""
+
+    async def test_get_ups_configuration(self) -> None:
+        """Test getting UPS configuration returns model."""
+        from unraid_api.models import UPSConfiguration
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "upsConfiguration": {
+                            "service": "apcupsd",
+                            "upsCable": "usb",
+                            "customUpsCable": None,
+                            "upsType": "usb",
+                            "device": "/dev/usb/hiddev0",
+                            "overrideUpsCapacity": False,
+                            "batteryLevel": 10,
+                            "minutes": 5,
+                            "timeout": 0,
+                            "killUps": False,
+                            "nisIp": "0.0.0.0",
+                            "netServer": "off",
+                            "upsName": "APC Back-UPS",
+                            "modelName": "Back-UPS 650",
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_ups_configuration()
+
+                assert isinstance(result, UPSConfiguration)
+                assert result.service == "apcupsd"
+                assert result.upsCable == "usb"
+                assert result.device == "/dev/usb/hiddev0"
+                assert result.batteryLevel == 10
+                assert result.minutes == 5
+                assert result.killUps is False
+                assert result.modelName == "Back-UPS 650"
+
+    async def test_get_ups_configuration_empty(self) -> None:
+        """Test getting UPS configuration when no UPS configured."""
+        from unraid_api.models import UPSConfiguration
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={"data": {"upsConfiguration": {}}},
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_ups_configuration()
+
+                assert isinstance(result, UPSConfiguration)
+                assert result.service is None
+                assert result.upsCable is None
+
+
+class TestGetDisplaySettingsMethod:
+    """Tests for get_display_settings method."""
+
+    async def test_get_display_settings(self) -> None:
+        """Test getting display settings returns model with temp thresholds."""
+        from unraid_api.models import DisplaySettings
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "info": {
+                            "display": {
+                                "theme": "white",
+                                "unit": "CELSIUS",
+                                "scale": False,
+                                "tabs": False,
+                                "resize": True,
+                                "wwn": False,
+                                "total": True,
+                                "usage": True,
+                                "text": False,
+                                "warning": 55,
+                                "critical": 65,
+                                "hot": 45,
+                                "max": 70,
+                                "locale": "en_US",
+                            }
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_display_settings()
+
+                assert isinstance(result, DisplaySettings)
+                assert result.theme == "white"
+                assert result.unit == "CELSIUS"
+                assert result.warning == 55
+                assert result.critical == 65
+                assert result.hot == 45
+                assert result.max == 70
+                assert result.locale == "en_US"
+
+    async def test_get_display_settings_empty(self) -> None:
+        """Test getting display settings with empty response."""
+        from unraid_api.models import DisplaySettings
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={"data": {"info": {"display": {}}}},
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_display_settings()
+
+                assert isinstance(result, DisplaySettings)
+                assert result.unit is None
+                assert result.warning is None
+                assert result.critical is None
+
+
+class TestGetDockerPortConflictsMethod:
+    """Tests for get_docker_port_conflicts method."""
+
+    async def test_get_docker_port_conflicts(self) -> None:
+        """Test getting Docker port conflicts returns model."""
+        from unraid_api.models import DockerPortConflicts
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "docker": {
+                            "portConflicts": {
+                                "lanPorts": [
+                                    {
+                                        "containers": [
+                                            {"name": "plex"},
+                                            {"name": "jellyfin"},
+                                        ]
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_docker_port_conflicts()
+
+                assert isinstance(result, DockerPortConflicts)
+                assert len(result.lanPorts) == 1
+                assert len(result.lanPorts[0].containers) == 2
+                assert result.lanPorts[0].containers[0].name == "plex"
+                assert result.lanPorts[0].containers[1].name == "jellyfin"
+
+    async def test_get_docker_port_conflicts_none(self) -> None:
+        """Test getting Docker port conflicts with no conflicts."""
+        from unraid_api.models import DockerPortConflicts
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={"data": {"docker": {"portConflicts": {"lanPorts": []}}}},
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_docker_port_conflicts()
+
+                assert isinstance(result, DockerPortConflicts)
+                assert result.lanPorts == []

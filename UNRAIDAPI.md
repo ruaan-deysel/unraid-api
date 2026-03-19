@@ -810,6 +810,8 @@ type UPSPower {
   inputVoltage: Float!         # Volts
   outputVoltage: Float!        # Volts
   loadPercentage: Int!         # 0-100%
+  nominalPower: Int            # Nominal capacity in watts (optional, UPS-dependent)
+  currentPower: Float          # Current consumption in watts (derived from nominal × load)
 }
 
 type UPSConfiguration {

@@ -283,6 +283,17 @@ class ArrayDisk(UnraidBaseModel):
     status: str | None = None
     isSpinning: bool | None = None  # True = active, False = standby/sleeping
     smartStatus: str | None = None  # Only available via physical disk query
+    rotational: bool | None = None  # True for HDD, False for SSD
+    numReads: int | None = None  # Number of reads
+    numWrites: int | None = None  # Number of writes
+    numErrors: int | None = None  # Number of errors
+    warning: int | None = None  # Warning temperature threshold
+    critical: int | None = None  # Critical temperature threshold
+    color: str | None = None  # Disk color status indicator
+    format: str | None = None  # Disk format
+    transport: str | None = None  # Transport type (e.g., "sata")
+    comment: str | None = None  # User comment/description
+    exportable: bool | None = None  # Whether disk is exportable
 
     @property
     def is_standby(self) -> bool:
@@ -364,6 +375,7 @@ class UnraidArray(UnraidBaseModel):
     parities: list[ArrayDisk] = []
     caches: list[ArrayDisk] = []
     boot: ArrayDisk | None = None
+    bootDevices: list[ArrayDisk] = []  # Boot devices (v4.30.0+)
 
 
 # =============================================================================
@@ -414,16 +426,45 @@ class ContainerHostConfig(UnraidBaseModel):
     networkMode: str | None = None
 
 
-class DockerContainerStats(UnraidBaseModel):
-    """Docker container resource statistics."""
+class TailscaleStatus(UnraidBaseModel):
+    """Tailscale status for a Docker container."""
 
+    hostname: str | None = None
+    dnsName: str | None = None
+    online: bool | None = None
+
+
+class ContainerTemplatePort(UnraidBaseModel):
+    """Docker container template port mapping."""
+
+    ip: str | None = None
+    privatePort: int | None = None
+    publicPort: int | None = None
+    type: str | None = None
+
+
+class DockerContainerStats(UnraidBaseModel):
+    """Docker container resource statistics.
+
+    Available via the ``dockerContainerStats`` GraphQL subscription.
+    Not queryable inline on containers.
+
+    Attributes:
+        id: Container prefixed ID.
+        cpuPercent: CPU usage percentage.
+        memUsage: Memory usage string (e.g. "100MB / 1GB").
+        memPercent: Memory usage percentage.
+        netIO: Network I/O string (e.g. "100MB / 1GB").
+        blockIO: Block I/O string (e.g. "100MB / 1GB").
+
+    """
+
+    id: str | None = None
     cpuPercent: float | None = None
-    memoryUsage: int | None = None  # Memory in bytes
-    memoryPercent: float | None = None
-    networkRx: int | None = None  # Bytes received
-    networkTx: int | None = None  # Bytes transmitted
-    blockRead: int | None = None  # Bytes read from disk
-    blockWrite: int | None = None  # Bytes written to disk
+    memUsage: str | None = None
+    memPercent: float | None = None
+    netIO: str | None = None
+    blockIO: str | None = None
 
 
 class DockerContainer(UnraidBaseModel):
@@ -449,7 +490,21 @@ class DockerContainer(UnraidBaseModel):
     isOrphaned: bool | None = None
     hostConfig: ContainerHostConfig | None = None
     ports: list[ContainerPort] = []
-    stats: DockerContainerStats | None = None
+    # Extended fields (v4.30.0+)
+    sizeRw: int | None = None  # Read-write size in bytes
+    sizeLog: int | None = None  # Log size in bytes
+    autoStartOrder: int | None = None  # Auto-start order priority
+    autoStartWait: int | None = None  # Seconds to wait before starting next
+    shell: str | None = None  # Default shell (e.g., "sh", "bash")
+    templatePath: str | None = None  # Template XML path
+    projectUrl: str | None = None  # Project URL
+    registryUrl: str | None = None  # Registry URL
+    supportUrl: str | None = None  # Support URL
+    tailscaleEnabled: bool | None = None  # Whether Tailscale is enabled
+    tailscaleStatus: TailscaleStatus | None = None  # Tailscale connection status
+    isRebuildReady: bool | None = None  # Whether container is ready to rebuild
+    templatePorts: list[ContainerTemplatePort] | None = None  # Template port mappings
+    lanIpPorts: list[str] | None = None  # LAN IP port strings
 
     @property
     def is_running(self) -> bool:
@@ -498,9 +553,28 @@ class DockerContainer(UnraidBaseModel):
             isOrphaned=data.get("isOrphaned"),
             hostConfig=(ContainerHostConfig(**host_config) if host_config else None),
             ports=[ContainerPort(**p) for p in (data.get("ports") or [])],
-            stats=(
-                DockerContainerStats(**data["stats"]) if data.get("stats") else None
+            sizeRw=data.get("sizeRw"),
+            sizeLog=data.get("sizeLog"),
+            autoStartOrder=data.get("autoStartOrder"),
+            autoStartWait=data.get("autoStartWait"),
+            shell=data.get("shell"),
+            templatePath=data.get("templatePath"),
+            projectUrl=data.get("projectUrl"),
+            registryUrl=data.get("registryUrl"),
+            supportUrl=data.get("supportUrl"),
+            tailscaleEnabled=data.get("tailscaleEnabled"),
+            tailscaleStatus=(
+                TailscaleStatus(**data["tailscaleStatus"])
+                if data.get("tailscaleStatus")
+                else None
             ),
+            isRebuildReady=data.get("isRebuildReady"),
+            templatePorts=(
+                [ContainerTemplatePort(**p) for p in data["templatePorts"]]
+                if data.get("templatePorts")
+                else None
+            ),
+            lanIpPorts=data.get("lanIpPorts"),
         )
 
 
@@ -576,6 +650,8 @@ class UPSPower(UnraidBaseModel):
     inputVoltage: float | None = None
     outputVoltage: float | None = None
     loadPercentage: float | None = None
+    nominalPower: int | None = None
+    currentPower: float | None = None
 
 
 class UPSDevice(UnraidBaseModel):
@@ -625,6 +701,17 @@ class Share(UnraidBaseModel):
     size: int | None = None  # Size in KB (often returns 0)
     used: int | None = None  # Used in KB
     free: int | None = None  # Free in KB
+    # Extended fields (v4.30.0+)
+    cache: str | None = None  # Cache setting (e.g., "no", "yes", "prefer", "only")
+    include: list[str] | None = None  # Included disks
+    exclude: list[str] | None = None  # Excluded disks
+    nameOrig: str | None = None  # Original share name
+    allocator: str | None = None  # Allocation method
+    splitLevel: str | None = None  # Split level
+    floor: str | None = None  # Minimum free space floor
+    cow: str | None = None  # Copy-on-write setting
+    color: str | None = None  # Share color indicator
+    luksStatus: str | None = None  # LUKS encryption status
 
     @property
     def size_bytes(self) -> int | None:
@@ -897,6 +984,13 @@ class ServerInfo(UnraidBaseModel):
 # =============================================================================
 
 
+class KeyFile(UnraidBaseModel):
+    """Unraid license key file information."""
+
+    location: str | None = None
+    contents: str | None = None
+
+
 class Registration(UnraidBaseModel):
     """Unraid license registration information."""
 
@@ -905,6 +999,7 @@ class Registration(UnraidBaseModel):
     state: str | None = None  # License state
     expiration: str | None = None
     updateExpiration: str | None = None
+    keyFile: KeyFile | None = None  # License key file (v4.30.0+)
 
 
 # =============================================================================
@@ -998,6 +1093,13 @@ class Vars(UnraidBaseModel):
     md_resync_pos: str | None = Field(default=None, alias="mdResyncPos")
     md_state: str | None = Field(default=None, alias="mdState")
     md_version: str | None = Field(default=None, alias="mdVersion")
+    sb_version: str | None = Field(default=None, alias="sbVersion")
+
+    # Join/poll status
+    join_status: str | None = Field(default=None, alias="joinStatus")
+    poll_attributes_status: str | None = Field(
+        default=None, alias="pollAttributesStatus"
+    )
 
     # Cache state
     cache_num_devices: int | None = Field(default=None, alias="cacheNumDevices")
@@ -1425,3 +1527,170 @@ class DockerContainerLogs(UnraidBaseModel):
     containerId: str | None = None
     lines: list[DockerContainerLogLine] = []
     cursor: str | None = None
+
+
+# =============================================================================
+# Container Update Status Models (v4.30.0+)
+# =============================================================================
+
+
+class ContainerUpdateStatus(UnraidBaseModel):
+    """Docker container update status.
+
+    Attributes:
+        name: Container name.
+        updateStatus: Update status (e.g., "UP_TO_DATE", "UPDATE_AVAILABLE").
+
+    """
+
+    name: str
+    updateStatus: str | None = None
+
+
+# =============================================================================
+# UPS Configuration Models (v4.30.0+)
+# =============================================================================
+
+
+class UPSConfiguration(UnraidBaseModel):
+    """UPS configuration settings.
+
+    Attributes:
+        service: UPS service configuration.
+        upsCable: Cable type (e.g., "usb").
+        customUpsCable: Custom cable type if applicable.
+        upsType: UPS type.
+        device: UPS device path.
+        overrideUpsCapacity: Whether to override UPS capacity.
+        batteryLevel: Battery level threshold for shutdown.
+        minutes: Minutes threshold for shutdown.
+        timeout: Timeout value.
+        killUps: Whether to kill UPS on shutdown.
+        nisIp: Network Information Server IP.
+        netServer: Network server setting.
+        upsName: UPS display name.
+        modelName: UPS model name.
+
+    """
+
+    service: str | None = None
+    upsCable: str | None = None
+    customUpsCable: str | None = None
+    upsType: str | None = None
+    device: str | None = None
+    overrideUpsCapacity: bool | None = None
+    batteryLevel: int | None = None
+    minutes: int | None = None
+    timeout: int | None = None
+    killUps: bool | None = None
+    nisIp: str | None = None
+    netServer: str | None = None
+    upsName: str | None = None
+    modelName: str | None = None
+
+
+# =============================================================================
+# Display Settings Models (v4.30.0+)
+# =============================================================================
+
+
+class DisplaySettings(UnraidBaseModel):
+    """Display and temperature settings.
+
+    Attributes:
+        theme: UI theme (e.g., "white", "black").
+        unit: Temperature unit (e.g., "CELSIUS", "FAHRENHEIT").
+        scale: Scale setting.
+        tabs: Tab configuration.
+        resize: Resize setting.
+        wwn: WWN display setting.
+        total: Total display setting.
+        usage: Usage display setting.
+        text: Text display setting.
+        warning: Warning temperature threshold.
+        critical: Critical temperature threshold.
+        hot: Hot temperature threshold.
+        max: Maximum temperature threshold.
+        locale: Locale setting (e.g., "en_US").
+
+    """
+
+    theme: str | None = None
+    unit: str | None = None
+    scale: str | bool | None = None
+    tabs: str | bool | None = None
+    resize: str | bool | None = None
+    wwn: str | bool | None = None
+    total: str | bool | None = None
+    usage: str | bool | None = None
+    text: str | bool | None = None
+    warning: int | None = None
+    critical: int | None = None
+    hot: int | None = None
+    max: int | None = None
+    locale: str | None = None
+
+
+# =============================================================================
+# Docker Port Conflicts Models (v4.30.0+)
+# =============================================================================
+
+
+class DockerPortConflictContainer(UnraidBaseModel):
+    """Container involved in a port conflict."""
+
+    name: str
+
+
+class DockerLanPortConflict(UnraidBaseModel):
+    """A LAN port conflict entry."""
+
+    containers: list[DockerPortConflictContainer] = []
+
+
+class DockerPortConflicts(UnraidBaseModel):
+    """Docker port conflicts information."""
+
+    lanPorts: list[DockerLanPortConflict] = []
+
+
+# =============================================================================
+# Subscription Models (real-time WebSocket data)
+# =============================================================================
+
+
+class CpuCore(UnraidBaseModel):
+    """Individual CPU core utilization from subscription."""
+
+    percentTotal: float | None = None
+
+
+class CpuMetrics(UnraidBaseModel):
+    """CPU utilization metrics from systemMetricsCpu subscription."""
+
+    percentTotal: float | None = None
+    cpus: list[CpuCore] = []
+
+
+class CpuTelemetryMetrics(UnraidBaseModel):
+    """CPU telemetry (power/temp) from systemMetricsCpuTelemetry subscription."""
+
+    totalPower: float | None = None
+    power: list[float] | float | None = None
+    temp: list[float] | float | None = None
+
+
+class MemoryMetrics(UnraidBaseModel):
+    """Memory utilization from systemMetricsMemory subscription."""
+
+    total: int | None = None
+    used: int | None = None
+    free: int | None = None
+    percentTotal: float | None = None
+
+
+class ArraySubscriptionUpdate(UnraidBaseModel):
+    """Array state update from arraySubscription subscription."""
+
+    state: str | None = None
+    capacity: ArrayCapacity | None = None
