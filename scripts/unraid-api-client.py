@@ -24,7 +24,6 @@ import asyncio
 import os
 import sys
 from pathlib import Path
-from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
@@ -40,8 +39,8 @@ def load_env() -> tuple[str, str]:
     if not host or not api_key:
         env_path = Path(__file__).resolve().parent / ".env"
         if env_path.exists():
-            for line in env_path.read_text().strip().splitlines():
-                line = line.strip()
+            for raw_line in env_path.read_text().strip().splitlines():
+                line = raw_line.strip()
                 if line.startswith("IP:"):
                     host = host or line.split(":", 1)[1].strip()
                 elif line.startswith("API Key:"):
@@ -105,7 +104,7 @@ class TestRunner:
 # ---------------------------------------------------------------------------
 
 
-async def run_query_tests(client: UnraidClient) -> int:  # noqa: PLR0912, PLR0915
+async def run_query_tests(client: UnraidClient) -> int:  # noqa: PLR0915
     """Run all query and typed-method tests. Returns exit code."""
     t = TestRunner("COMPREHENSIVE LIVE API TEST — READ ONLY")
     t.header()
@@ -220,7 +219,10 @@ async def run_query_tests(client: UnraidClient) -> int:  # noqa: PLR0912, PLR091
         all_d = ad.get("disks", []) + ad.get("parities", []) + ad.get("caches", [])
         spinning = sum(1 for d in all_d if d.get("isSpinning"))
         t.record("get_array_disks", "PASS")
-        print(f"✓ get_array_disks: {total_d} data, {parities} parity, {caches} cache ({spinning} spinning)")
+        print(
+            f"✓ get_array_disks: {total_d} data, {parities} parity,"
+            f" {caches} cache ({spinning} spinning)"
+        )
     except Exception as e:
         t.record("get_array_disks", f"FAIL: {e}")
         print(f"✗ get_array_disks: {e}")
@@ -295,7 +297,11 @@ async def run_query_tests(client: UnraidClient) -> int:  # noqa: PLR0912, PLR091
         t.record("get_parity_history", "PASS")
         print(f"✓ get_parity_history: {len(ph)} entries")
         for entry in ph[:2]:
-            print(f"  → date={entry.date}, duration={entry.duration_formatted}, errors={entry.errors}")
+            print(
+                f"  → date={entry.date},"
+                f" duration={entry.duration_formatted},"
+                f" errors={entry.errors}"
+            )
     except Exception as e:
         t.record("get_parity_history", f"FAIL: {e}")
         print(f"✗ get_parity_history: {e}")
@@ -391,7 +397,11 @@ async def run_query_tests(client: UnraidClient) -> int:  # noqa: PLR0912, PLR091
         t.record("typed_get_array", "PASS")
         print(f"✓ typed_get_array: state={ta.state}, disks={len(ta.disks)}")
         for disk in ta.disks[:3]:
-            print(f"  → {disk.name or disk.id}: healthy={disk.is_healthy}, {disk.usage_percent}%")
+            print(
+                f"  → {disk.name or disk.id}:"
+                f" healthy={disk.is_healthy},"
+                f" {disk.usage_percent}%"
+            )
     except Exception as e:
         t.record("typed_get_array", f"FAIL: {e}")
         print(f"✗ typed_get_array: {e}")
@@ -427,24 +437,30 @@ async def run_query_tests(client: UnraidClient) -> int:  # noqa: PLR0912, PLR091
         for ups in tu:
             print(f"  → {ups.name}: connected={ups.is_connected}, status={ups.status}")
             if ups.battery:
-                print(f"    battery: {ups.battery.chargeLevel}%, runtime={ups.battery.runtime_formatted}")
+                print(
+                    f"    battery: {ups.battery.chargeLevel}%,"
+                    f" runtime={ups.battery.runtime_formatted}"
+                )
     except Exception as e:
         t.record("typed_get_ups_devices", f"FAIL: {e}")
         print(f"✗ typed_get_ups_devices: {e}")
 
     # 34-39: Batch typed methods
     for method_name, call in [
-        ("typed_get_shares", lambda: client.typed_get_shares()),
-        ("typed_get_flash", lambda: client.typed_get_flash()),
-        ("typed_get_owner", lambda: client.typed_get_owner()),
-        ("typed_get_plugins", lambda: client.typed_get_plugins()),
-        ("typed_get_docker_networks", lambda: client.typed_get_docker_networks()),
-        ("typed_get_log_files", lambda: client.typed_get_log_files()),
+        ("typed_get_shares", client.typed_get_shares),
+        ("typed_get_flash", client.typed_get_flash),
+        ("typed_get_owner", client.typed_get_owner),
+        ("typed_get_plugins", client.typed_get_plugins),
+        ("typed_get_docker_networks", client.typed_get_docker_networks),
+        ("typed_get_log_files", client.typed_get_log_files),
     ]:
         try:
             result = await call()
             t.record(method_name, "PASS")
-            detail = f"{len(result)} items" if isinstance(result, list) else type(result).__name__
+            if isinstance(result, list):
+                detail = f"{len(result)} items"
+            else:
+                detail = type(result).__name__
             print(f"✓ {method_name}: {detail}")
         except Exception as e:
             t.record(method_name, f"FAIL: {e}")
@@ -454,16 +470,20 @@ async def run_query_tests(client: UnraidClient) -> int:  # noqa: PLR0912, PLR091
     try:
         no = await client.get_notification_overview()
         t.record("get_notification_overview", "PASS")
-        print(f"✓ get_notification_overview: unread={no.unread.total}, archive={no.archive.total}")
+        print(
+            f"✓ get_notification_overview:"
+            f" unread={no.unread.total},"
+            f" archive={no.archive.total}"
+        )
     except Exception as e:
         t.record("get_notification_overview", f"FAIL: {e}")
         print(f"✗ get_notification_overview: {e}")
 
     # 41-43: Typed cloud/connect/remote
     for method_name, call in [
-        ("typed_get_cloud", lambda: client.typed_get_cloud()),
-        ("typed_get_connect", lambda: client.typed_get_connect()),
-        ("typed_get_remote_access", lambda: client.typed_get_remote_access()),
+        ("typed_get_cloud", client.typed_get_cloud),
+        ("typed_get_connect", client.typed_get_connect),
+        ("typed_get_remote_access", client.typed_get_remote_access),
     ]:
         try:
             result = await call()
@@ -504,7 +524,10 @@ async def run_query_tests(client: UnraidClient) -> int:  # noqa: PLR0912, PLR091
     try:
         uc = await client.get_ups_configuration()
         t.record("get_ups_configuration", "PASS")
-        print(f"✓ get_ups_configuration: cable={uc.upsCable}, batteryLevel={uc.batteryLevel}")
+        print(
+            f"✓ get_ups_configuration:"
+            f" cable={uc.upsCable}, batteryLevel={uc.batteryLevel}"
+        )
     except Exception as e:
         t.record("get_ups_configuration", f"FAIL: {e}")
         print(f"✗ get_ups_configuration: {e}")
@@ -533,7 +556,10 @@ async def run_query_tests(client: UnraidClient) -> int:  # noqa: PLR0912, PLR091
         if containers:
             c = containers[0]
             t.record("extended_container_fields", "PASS")
-            print(f"✓ extended_container_fields: shell={c.shell}, autoStart={c.autoStartOrder}")
+            print(
+                f"✓ extended_container_fields:"
+                f" shell={c.shell}, autoStart={c.autoStartOrder}"
+            )
         else:
             t.record("extended_container_fields", "PASS (no containers)")
             print("✓ extended_container_fields: (no containers)")
@@ -547,7 +573,11 @@ async def run_query_tests(client: UnraidClient) -> int:  # noqa: PLR0912, PLR091
         if array.disks:
             d = array.disks[0]
             t.record("extended_array_disk_fields", "PASS")
-            print(f"✓ extended_array_disk_fields: rotational={d.rotational}, transport={d.transport}")
+            print(
+                f"✓ extended_array_disk_fields:"
+                f" rotational={d.rotational},"
+                f" transport={d.transport}"
+            )
         else:
             t.record("extended_array_disk_fields", "PASS (no disks)")
     except Exception as e:
@@ -560,7 +590,10 @@ async def run_query_tests(client: UnraidClient) -> int:  # noqa: PLR0912, PLR091
         if shares:
             s = shares[0]
             t.record("extended_share_fields", "PASS")
-            print(f"✓ extended_share_fields: {s.name} - allocator={s.allocator}, cow={s.cow}")
+            print(
+                f"✓ extended_share_fields: {s.name}"
+                f" - allocator={s.allocator}, cow={s.cow}"
+            )
         else:
             t.record("extended_share_fields", "PASS (no shares)")
     except Exception as e:
@@ -571,7 +604,11 @@ async def run_query_tests(client: UnraidClient) -> int:  # noqa: PLR0912, PLR091
     try:
         vars_d = await client.typed_get_vars()
         t.record("extended_vars_fields", "PASS")
-        print(f"✓ extended_vars_fields: sbVersion={vars_d.sb_version}, joinStatus={vars_d.join_status}")
+        print(
+            f"✓ extended_vars_fields:"
+            f" sbVersion={vars_d.sb_version},"
+            f" joinStatus={vars_d.join_status}"
+        )
     except Exception as e:
         t.record("extended_vars_fields", f"FAIL: {e}")
         print(f"✗ extended_vars_fields: {e}")
@@ -603,7 +640,7 @@ async def run_query_tests(client: UnraidClient) -> int:  # noqa: PLR0912, PLR091
 # ---------------------------------------------------------------------------
 
 
-async def run_subscription_tests(client: UnraidClient) -> int:  # noqa: PLR0912, PLR0915
+async def run_subscription_tests(client: UnraidClient) -> int:  # noqa: PLR0915
     """Run WebSocket subscription tests. Returns exit code."""
     t = TestRunner("WEBSOCKET SUBSCRIPTION LIVE TEST")
     t.header()
@@ -628,7 +665,11 @@ async def run_subscription_tests(client: UnraidClient) -> int:  # noqa: PLR0912,
         print("\n2. subscribe_memory_metrics()...")
         count = 0
         async for mem in client.subscribe_memory_metrics():
-            print(f"   Memory: total={mem.total}, used={mem.used}, percent={mem.percentTotal}%")
+            print(
+                f"   Memory: total={mem.total},"
+                f" used={mem.used},"
+                f" percent={mem.percentTotal}%"
+            )
             count += 1
             if count >= 2:
                 break
@@ -670,13 +711,18 @@ async def run_subscription_tests(client: UnraidClient) -> int:  # noqa: PLR0912,
             await asyncio.wait_for(_array_test(), timeout=10.0)
             t.record("subscribe_array_updates", "PASS")
             print("   PASS")
-        except asyncio.TimeoutError:
+        except TimeoutError:
             if count > 0:
                 t.record("subscribe_array_updates", f"PASS ({count} event(s) in 10s)")
                 print(f"   PASS ({count} event(s) in 10s)")
             else:
-                t.record("subscribe_array_updates", "PASS (connected, no events in 10s)")
-                print("   PASS (connected, no events in 10s)")
+                t.record(
+                    "subscribe_array_updates",
+                    "PASS (connected, no events in 10s)",
+                )
+                print(
+                    "   PASS (connected, no events in 10s)"
+                )
     except Exception as e:
         t.record("subscribe_array_updates", f"FAIL: {e}")
         print(f"   FAIL: {e}")
@@ -699,7 +745,7 @@ async def run_subscription_tests(client: UnraidClient) -> int:  # noqa: PLR0912,
             await asyncio.wait_for(_ups_test(), timeout=10.0)
             t.record("subscribe_ups_updates", "PASS")
             print("   PASS")
-        except asyncio.TimeoutError:
+        except TimeoutError:
             if count > 0:
                 t.record("subscribe_ups_updates", f"PASS ({count} event(s) in 10s)")
                 print(f"   PASS ({count} event(s) in 10s)")
@@ -714,12 +760,19 @@ async def run_subscription_tests(client: UnraidClient) -> int:  # noqa: PLR0912,
     try:
         print("\n6. subscribe_container_stats()...")
         containers = await client.get_containers()
-        running = [c for c in containers if str(c.get("state", "")).lower() == "running"]
+        running = [
+            c for c in containers
+            if str(c.get("state", "")).lower() == "running"
+        ]
         if running:
             print(f"   {len(running)} running containers detected")
             count = 0
             async for stats in client.subscribe_container_stats():
-                print(f"   Stats: id={stats.id}, cpu={stats.cpuPercent}%, mem={stats.memUsage}")
+                print(
+                    f"   Stats: id={stats.id},"
+                    f" cpu={stats.cpuPercent}%,"
+                    f" mem={stats.memUsage}"
+                )
                 count += 1
                 if count >= 2:
                     break
@@ -751,7 +804,7 @@ async def run_subscription_tests(client: UnraidClient) -> int:  # noqa: PLR0912,
             await asyncio.wait_for(_raw_test(), timeout=10.0)
             t.record("subscribe_raw", "PASS")
             print("   PASS")
-        except asyncio.TimeoutError:
+        except TimeoutError:
             if count > 0:
                 t.record("subscribe_raw", f"PASS ({count} event(s) in 10s)")
                 print(f"   PASS ({count} event(s) in 10s)")
@@ -869,14 +922,18 @@ examples:
   %(prog)s --all             # Run everything
 """,
     )
-    parser.add_argument("--subscriptions", action="store_true", help="Run subscription tests")
+    parser.add_argument(
+        "--subscriptions",
+        action="store_true",
+        help="Run subscription tests",
+    )
     parser.add_argument("--ssl", action="store_true", help="Run SSL detection tests")
     parser.add_argument("--all", action="store_true", help="Run all test suites")
     args = parser.parse_args()
 
     host, api_key = load_env()
     print(f"Host: {host}")
-    print(f"API Key: {api_key[:8]}...{api_key[-4:]}")
+    print(f"API Key: {'*' * 8}...{'*' * 4} (loaded)")
     print()
 
     exit_code = 0
