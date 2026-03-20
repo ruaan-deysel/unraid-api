@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Resolved all CodeQL clear-text logging alerts (#2–#14)** — API key no longer appears in any method that contains logging calls; auth headers are pre-computed once in `__init__` via `self._auth_headers` and referenced by name elsewhere
+- **Redacted API key from test script output** — `scripts/unraid-api-client.py` no longer prints any portion of the API key
+
+### Changed
+
+- **Fixed all ruff lint warnings in `scripts/unraid-api-client.py`** — line length (E501), unnecessary lambdas (PLW0108), loop variable overwrite (PLW2901), deprecated `asyncio.TimeoutError` alias (UP041), and unused noqa directives (RUF100)
+- Replaced per-request `headers = {"x-api-key": self._api_key}` construction in `_discover_redirect_url`, `_make_request`, and `subscribe` with shared `self._auth_headers` dict
+
 ## [1.7.0] - 2026-03-19
 
 ### Added
