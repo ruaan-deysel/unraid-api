@@ -599,6 +599,65 @@ async def run_query_tests(client: UnraidClient) -> int:  # noqa: PLR0912, PLR091
 
 
 # ---------------------------------------------------------------------------
+# Notification mutation tests
+# ---------------------------------------------------------------------------
+
+
+async def run_mutation_tests(client: UnraidClient) -> int:
+    """Run notification mutation tests (archive/delete). Returns exit code."""
+    t = TestRunner("NOTIFICATION MUTATION LIVE TEST")
+    t.header()
+
+    # 1. Get initial overview
+    try:
+        overview = await client.get_notification_overview()
+        t.record("initial_overview", "PASS")
+        print(f"✓ initial_overview: unread={overview.unread.total}, archive={overview.archive.total}")
+    except Exception as e:
+        t.record("initial_overview", f"FAIL: {e}")
+        print(f"✗ initial_overview: {e}")
+        return t.summary()
+
+    # 2. Archive all notifications
+    try:
+        result = await client.archive_all_notifications()
+        t.record("archive_all_notifications", "PASS")
+        print(f"✓ archive_all_notifications: {result}")
+    except Exception as e:
+        t.record("archive_all_notifications", f"FAIL: {e}")
+        print(f"✗ archive_all_notifications: {e}")
+
+    # 3. Check overview after archive
+    try:
+        overview = await client.get_notification_overview()
+        t.record("post_archive_overview", "PASS")
+        print(f"✓ post_archive_overview: unread={overview.unread.total}, archive={overview.archive.total}")
+    except Exception as e:
+        t.record("post_archive_overview", f"FAIL: {e}")
+        print(f"✗ post_archive_overview: {e}")
+
+    # 4. Delete all archived notifications
+    try:
+        result = await client.delete_all_notifications()
+        t.record("delete_all_notifications", "PASS")
+        print(f"✓ delete_all_notifications: {result}")
+    except Exception as e:
+        t.record("delete_all_notifications", f"FAIL: {e}")
+        print(f"✗ delete_all_notifications: {e}")
+
+    # 5. Final overview
+    try:
+        overview = await client.get_notification_overview()
+        t.record("final_overview", "PASS")
+        print(f"✓ final_overview: unread={overview.unread.total}, archive={overview.archive.total}")
+    except Exception as e:
+        t.record("final_overview", f"FAIL: {e}")
+        print(f"✗ final_overview: {e}")
+
+    return t.summary()
+
+
+# ---------------------------------------------------------------------------
 # WebSocket subscription tests
 # ---------------------------------------------------------------------------
 
@@ -864,11 +923,13 @@ async def main() -> int:
         epilog="""\
 examples:
   %(prog)s                   # Run all query tests (default)
+  %(prog)s --mutations       # Run notification mutation tests
   %(prog)s --subscriptions   # Run WebSocket subscription tests
   %(prog)s --ssl             # Run SSL detection tests
   %(prog)s --all             # Run everything
 """,
     )
+    parser.add_argument("--mutations", action="store_true", help="Run notification mutation tests")
     parser.add_argument("--subscriptions", action="store_true", help="Run subscription tests")
     parser.add_argument("--ssl", action="store_true", help="Run SSL detection tests")
     parser.add_argument("--all", action="store_true", help="Run all test suites")
@@ -882,18 +943,26 @@ examples:
     exit_code = 0
 
     # Determine which suites to run
-    run_queries = args.all or (not args.subscriptions and not args.ssl)
+    has_specific = args.subscriptions or args.ssl or args.mutations
+    run_queries = args.all or not has_specific
+    run_mutations = args.all or args.mutations
     run_subs = args.all or args.subscriptions
     run_ssl_flag = args.all or args.ssl
 
-    if run_queries or run_subs:
+    if run_queries or run_subs or run_mutations:
         async with UnraidClient(host, api_key, verify_ssl=False) as client:
             if run_queries:
                 rc = await run_query_tests(client)
                 exit_code = max(exit_code, rc)
 
-            if run_subs:
+            if run_mutations:
                 if run_queries:
+                    print("\n\n")
+                rc = await run_mutation_tests(client)
+                exit_code = max(exit_code, rc)
+
+            if run_subs:
+                if run_queries or run_mutations:
                     print("\n\n")
                 rc = await run_subscription_tests(client)
                 exit_code = max(exit_code, rc)

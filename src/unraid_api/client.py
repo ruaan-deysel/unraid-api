@@ -2670,11 +2670,9 @@ class UnraidClient:
         """
         mutation = """
             mutation ArchiveNotification($id: PrefixedID!) {
-                notifications {
-                    archive(id: $id) {
-                        id
-                        title
-                    }
+                archiveNotification(id: $id) {
+                    id
+                    title
                 }
             }
         """
@@ -2692,46 +2690,54 @@ class UnraidClient:
         """
         mutation = """
             mutation UnarchiveNotification($id: PrefixedID!) {
-                notifications {
-                    unread(id: $id) {
-                        id
-                        title
-                    }
+                unreadNotification(id: $id) {
+                    id
+                    title
                 }
             }
         """
         return await self.mutate(mutation, {"id": notification_id})
 
-    async def delete_notification(self, notification_id: str) -> dict[str, Any]:
+    async def delete_notification(
+        self,
+        notification_id: str,
+        notification_type: str = "ARCHIVE",
+    ) -> dict[str, Any]:
         """Delete a notification.
 
         Args:
             notification_id: ID of the notification to delete.
+            notification_type: Type of notification ("ARCHIVE" or "UNREAD").
+                Defaults to "ARCHIVE".
 
         Returns:
-            Mutation response data.
+            Mutation response data with NotificationOverview.
 
         """
         mutation = """
-            mutation DeleteNotification($id: PrefixedID!) {
-                notifications {
-                    delete(id: $id)
+            mutation DeleteNotification($id: PrefixedID!, $type: NotificationType!) {
+                deleteNotification(id: $id, type: $type) {
+                    unread { total }
+                    archive { total }
                 }
             }
         """
-        return await self.mutate(mutation, {"id": notification_id})
+        return await self.mutate(
+            mutation, {"id": notification_id, "type": notification_type}
+        )
 
     async def archive_all_notifications(self) -> dict[str, Any]:
         """Archive all unread notifications.
 
         Returns:
-            Mutation response data.
+            Mutation response data with NotificationOverview.
 
         """
         mutation = """
             mutation ArchiveAllNotifications {
-                notifications {
-                    archiveAll
+                archiveAll {
+                    unread { total }
+                    archive { total }
                 }
             }
         """
@@ -2741,13 +2747,14 @@ class UnraidClient:
         """Delete all archived notifications.
 
         Returns:
-            Mutation response data.
+            Mutation response data with NotificationOverview.
 
         """
         mutation = """
-            mutation DeleteAllNotifications {
-                notifications {
-                    deleteAll
+            mutation DeleteArchivedNotifications {
+                deleteArchivedNotifications {
+                    unread { total }
+                    archive { total }
                 }
             }
         """
