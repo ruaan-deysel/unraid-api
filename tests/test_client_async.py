@@ -3695,18 +3695,23 @@ class TestGetRemoteAccessMethod:
 
 
 class TestNotificationMutations:
-    """Tests for notification mutation methods."""
+    """Tests for notification mutation methods.
+
+    All notification mutations are root-level (not nested under 'notifications').
+    See: https://github.com/ruaan-deysel/unraid-api/issues/24
+    """
 
     async def test_archive_notification(self) -> None:
-        """Test archiving a notification."""
+        """Test archiving a notification uses root-level archiveNotification."""
         with aioresponses() as m:
             m.get("http://192.168.1.100/graphql", status=400)
             m.post(
                 "http://192.168.1.100/graphql",
                 payload={
                     "data": {
-                        "notifications": {
-                            "archive": {"id": "notification:123", "title": "Test"}
+                        "archiveNotification": {
+                            "id": "notification:123",
+                            "title": "Test",
                         }
                     }
                 },
@@ -3717,19 +3722,20 @@ class TestNotificationMutations:
             ) as client:
                 result = await client.archive_notification("notification:123")
 
-                assert "notifications" in result
-                assert result["notifications"]["archive"]["id"] == "notification:123"
+                assert "archiveNotification" in result
+                assert result["archiveNotification"]["id"] == "notification:123"
 
     async def test_unarchive_notification(self) -> None:
-        """Test unarchiving a notification."""
+        """Test unarchiving a notification uses root-level unreadNotification."""
         with aioresponses() as m:
             m.get("http://192.168.1.100/graphql", status=400)
             m.post(
                 "http://192.168.1.100/graphql",
                 payload={
                     "data": {
-                        "notifications": {
-                            "unread": {"id": "notification:123", "title": "Test"}
+                        "unreadNotification": {
+                            "id": "notification:123",
+                            "title": "Test",
                         }
                     }
                 },
@@ -3740,15 +3746,49 @@ class TestNotificationMutations:
             ) as client:
                 result = await client.unarchive_notification("notification:123")
 
-                assert "notifications" in result
+                assert "unreadNotification" in result
+                assert result["unreadNotification"]["id"] == "notification:123"
 
     async def test_delete_notification(self) -> None:
-        """Test deleting a notification."""
+        """Test deleting a notification uses root-level deleteNotification with type."""
         with aioresponses() as m:
             m.get("http://192.168.1.100/graphql", status=400)
             m.post(
                 "http://192.168.1.100/graphql",
-                payload={"data": {"notifications": {"delete": True}}},
+                payload={
+                    "data": {
+                        "deleteNotification": {
+                            "unread": {"total": 5},
+                            "archive": {"total": 0},
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.delete_notification(
+                    "notification:123", notification_type="ARCHIVE"
+                )
+
+                assert "deleteNotification" in result
+                assert result["deleteNotification"]["unread"]["total"] == 5
+
+    async def test_delete_notification_default_type(self) -> None:
+        """Test delete_notification defaults to ARCHIVE type."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "deleteNotification": {
+                            "unread": {"total": 3},
+                            "archive": {"total": 0},
+                        }
+                    }
+                },
             )
 
             async with UnraidClient(
@@ -3756,15 +3796,22 @@ class TestNotificationMutations:
             ) as client:
                 result = await client.delete_notification("notification:123")
 
-                assert result["notifications"]["delete"] is True
+                assert "deleteNotification" in result
 
     async def test_archive_all_notifications(self) -> None:
-        """Test archiving all notifications."""
+        """Test archiving all notifications uses root-level archiveAll."""
         with aioresponses() as m:
             m.get("http://192.168.1.100/graphql", status=400)
             m.post(
                 "http://192.168.1.100/graphql",
-                payload={"data": {"notifications": {"archiveAll": True}}},
+                payload={
+                    "data": {
+                        "archiveAll": {
+                            "unread": {"total": 0},
+                            "archive": {"total": 10},
+                        }
+                    }
+                },
             )
 
             async with UnraidClient(
@@ -3772,15 +3819,23 @@ class TestNotificationMutations:
             ) as client:
                 result = await client.archive_all_notifications()
 
-                assert result["notifications"]["archiveAll"] is True
+                assert "archiveAll" in result
+                assert result["archiveAll"]["unread"]["total"] == 0
 
     async def test_delete_all_notifications(self) -> None:
-        """Test deleting all notifications."""
+        """Test deleting all archived uses root-level deleteArchivedNotifications."""
         with aioresponses() as m:
             m.get("http://192.168.1.100/graphql", status=400)
             m.post(
                 "http://192.168.1.100/graphql",
-                payload={"data": {"notifications": {"deleteAll": True}}},
+                payload={
+                    "data": {
+                        "deleteArchivedNotifications": {
+                            "unread": {"total": 5},
+                            "archive": {"total": 0},
+                        }
+                    }
+                },
             )
 
             async with UnraidClient(
@@ -3788,7 +3843,8 @@ class TestNotificationMutations:
             ) as client:
                 result = await client.delete_all_notifications()
 
-                assert result["notifications"]["deleteAll"] is True
+                assert "deleteArchivedNotifications" in result
+                assert result["deleteArchivedNotifications"]["archive"]["total"] == 0
 
 
 class TestResetVmMethod:

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Fixed all 5 notification mutation methods** sending incorrectly nested GraphQL mutations ([#24](https://github.com/ruaan-deysel/unraid-api/issues/24))
+  - `archive_notification()` — uses root-level `archiveNotification` instead of `notifications { archive }`
+  - `unarchive_notification()` — uses root-level `unreadNotification` instead of `notifications { unread }`
+  - `delete_notification()` — uses root-level `deleteNotification` with required `type` parameter instead of `notifications { delete }`
+  - `archive_all_notifications()` — uses root-level `archiveAll` with proper sub-selections instead of `notifications { archiveAll }`
+  - `delete_all_notifications()` — uses root-level `deleteArchivedNotifications` instead of `notifications { deleteAll }` (also fixes wrong field name)
+- All notification mutations now include required sub-field selections (`NotificationOverview` fields)
+
+### Changed
+
+- `delete_notification()` now accepts a `notification_type` parameter (`"ARCHIVE"` or `"UNREAD"`, defaults to `"ARCHIVE"`) as required by the Unraid API schema
+
 ## [1.7.0] - 2026-03-19
 
 ### Added
