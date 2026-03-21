@@ -7,7 +7,7 @@ Combines all test capabilities into a single script:
   - SSL detection tests
 
 Reads credentials from scripts/.env file:
-  IP: 192.168.20.21
+  IP: 192.168.10.100
   API Key: <key>
 
 Usage:
