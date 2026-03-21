@@ -191,15 +191,22 @@ class UnraidClient:
             if not hostname:
                 return "<redacted-host>"
             if parsed.port:
-                return f"{hostname}:{parsed.port}"
-            return hostname
-
-        # Non-URL host: strip any userinfo (user:pass@) if present
-        host = raw_host
-        if "@" in host:
-            host = host.split("@", 1)[1]
+                host = f"{hostname}:{parsed.port}"
+            else:
+                host = hostname
+        else:
+            # Non-URL host: strip any userinfo (user:pass@) if present
+            host = raw_host
+            if "@" in host:
+                host = host.split("@", 1)[1]
 
         host = host.rstrip("/")
+
+        # As a final safeguard, avoid logging values that look like opaque secrets.
+       # Heuristic: a single long token without dots or colons is likely not a hostname.
+        if host and len(host) >= 24 and all(ch not in host for ch in (".", ":", "/")):
+            return "<redacted-host>"
+
         return host or "<redacted-host>"
 
     @staticmethod
