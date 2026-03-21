@@ -1034,7 +1034,7 @@ examples:
     args = parser.parse_args()
 
     host, api_key = load_env()
-    print(f"Host: {_sanitize_host(host)}")
+    print("Host: <configured>")
     print(f"API Key: {'*' * 8}...{'*' * 4} (loaded)")
     print()
 
