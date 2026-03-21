@@ -941,7 +941,7 @@ async def _test_ssl_connection(
             verify_ssl=False,
         ) as client:
             redirect_url, use_ssl = await client._discover_redirect_url()
-            print(f"  Discovery: redirect_url={_sanitize_url(redirect_url)}, use_ssl={use_ssl}")
+            print(f"  Discovery: redirect_found={redirect_url is not None}, use_ssl={use_ssl}")
             client._resolved_url = None
             result = await client.test_connection()
             print(f"  Resolved URL: {_sanitize_url(client._resolved_url)}")
