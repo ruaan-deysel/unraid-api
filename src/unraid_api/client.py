@@ -6,7 +6,7 @@ import json
 import logging
 import uuid
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 import aiohttp
 
@@ -110,6 +110,12 @@ class UnraidClient:
 
         """
         self.host = host.strip()
+        if not (1 <= http_port <= 65535):
+            raise ValueError(f"http_port must be between 1 and 65535, got {http_port}")
+        if not (1 <= https_port <= 65535):
+            raise ValueError(f"https_port must be between 1 and 65535, got {https_port}")
+        if timeout < 1:
+            raise ValueError(f"timeout must be >= 1 second, got {timeout}")
         self.http_port = http_port
         self.https_port = https_port
         self.verify_ssl = verify_ssl
@@ -300,11 +306,15 @@ class UnraidClient:
                             hostname == "myunraid.net"
                             or hostname.endswith(".myunraid.net")
                         ):
+                            # Normalize to strip query params and fragments
+                            normalized_strict = urlunparse(
+                                (parsed.scheme, parsed.netloc, parsed.path, "", "", "")
+                            )
                             _LOGGER.info(
                                 "Discovered myunraid.net redirect (Strict mode): %s",
-                                redirect_url,
+                                normalized_strict,
                             )
-                            return (redirect_url, True)
+                            return (normalized_strict, True)
 
                         # Check for HTTPS redirect (Yes mode)
                         if parsed.scheme == "https":
@@ -312,7 +322,17 @@ class UnraidClient:
                             if port == DEFAULT_HTTPS_PORT:
                                 normalized = f"https://{hostname}{parsed.path}"
                             else:
-                                normalized = redirect_url
+                                # Normalize to strip query params and fragments
+                                normalized = urlunparse(
+                                    (
+                                        parsed.scheme,
+                                        parsed.netloc,
+                                        parsed.path,
+                                        "",
+                                        "",
+                                        "",
+                                    )
+                                )
                             _LOGGER.info(
                                 "Discovered HTTPS redirect (Yes mode): %s",
                                 normalized,
@@ -418,6 +438,22 @@ class UnraidClient:
                 if response.status in (301, 302, 307, 308):
                     redirect_url = response.headers.get("Location")
                     if redirect_url:
+                        parsed_original = urlparse(url)
+                        parsed_redirect = urlparse(redirect_url)
+                        redirect_host = parsed_redirect.hostname
+                        original_host = parsed_original.hostname
+                        # Only follow redirects to the same host or trusted myunraid.net
+                        if redirect_host != original_host and not (
+                            redirect_host is not None
+                            and (
+                                redirect_host == "myunraid.net"
+                                or redirect_host.endswith(".myunraid.net")
+                            )
+                        ):
+                            raise UnraidConnectionError(
+                                f"Redirect to untrusted host rejected: "
+                                f"{self._sanitize_url(redirect_url)}"
+                            )
                         self._resolved_url = redirect_url
                         async with self._session.post(
                             redirect_url,
@@ -450,8 +486,11 @@ class UnraidClient:
         except aiohttp.ClientResponseError as err:
             if err.status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
                 raise UnraidAuthenticationError(
-                    f"Authentication failed (HTTP {err.status}): {err.message}"
+                    "Invalid API key or insufficient permissions"
                 ) from err
+            # For server errors (5xx), avoid exposing internal server details
+            if err.status >= 500:
+                raise UnraidAPIError(f"HTTP error {err.status}") from err
             raise UnraidAPIError(f"HTTP error {err.status}: {err.message}") from err
         except aiohttp.ClientError as err:
             raise UnraidConnectionError(f"Connection failed: {err}") from err
@@ -494,7 +533,7 @@ class UnraidClient:
                 else:
                     error_messages.append(str(err))
 
-            _LOGGER.debug("Full GraphQL error response: %s", errors)
+            _LOGGER.debug("GraphQL returned %d error(s)", len(errors))
 
             if data:
                 # Partial failure - log and return data
