@@ -173,18 +173,31 @@ class UnraidClient:
             self._session = None
 
     def _get_clean_host(self) -> str:
-        """Get host without protocol prefix or embedded credentials."""
-        host = self.host
+        """Get a sanitized host string safe for logging (no credentials)."""
+        host = (self.host or "").strip()
+
+        # If this looks like a URL, parse it and extract only hostname[:port]
         if "://" in host:
-            parsed = urlparse(host)
+            try:
+                parsed = urlparse(host)
+            except Exception:
+                # Avoid logging unparsed value that might contain secrets
+                return "<redacted-host>"
+
             hostname = parsed.hostname or ""
+            if not hostname:
+                return "<redacted-host>"
+
             if parsed.port:
                 return f"{hostname}:{parsed.port}"
-            return hostname.rstrip("/")
-        # Strip userinfo (user:pass@) if present
+            return hostname
+
+        # Strip userinfo (user:pass@) if present in non-URL host
         if "@" in host:
             host = host.split("@", 1)[1]
-        return host.rstrip("/")
+
+        host = host.rstrip("/")
+        return host or "<redacted-host>"
 
     @staticmethod
     def _sanitize_url(url: str) -> str:
