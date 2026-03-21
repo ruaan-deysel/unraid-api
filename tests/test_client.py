@@ -13,7 +13,7 @@ class TestClientInitialization:
         client = UnraidClient(host, api_key)
 
         assert client.host == host
-        assert client._api_key == api_key
+        assert client._auth_headers == {"x-api-key": api_key}
         assert client.http_port == 80
         assert client.https_port == 443
         assert client.verify_ssl is True

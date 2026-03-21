@@ -114,7 +114,6 @@ class UnraidClient:
         self.https_port = https_port
         self.verify_ssl = verify_ssl
         self.timeout = timeout
-        self._api_key = api_key
         self._auth_headers: dict[str, str] = {"x-api-key": api_key}
         self._session: aiohttp.ClientSession | None = session
         self._owns_session: bool = session is None
@@ -549,7 +548,7 @@ class UnraidClient:
             json.dumps(
                 {
                     "type": "connection_init",
-                    "payload": self._auth_headers,
+                    "payload": headers,
                 }
             )
         )
