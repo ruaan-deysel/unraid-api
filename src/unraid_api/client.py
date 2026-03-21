@@ -114,7 +114,7 @@ class UnraidClient:
         self.https_port = https_port
         self.verify_ssl = verify_ssl
         self.timeout = timeout
-        self._api_key = api_key
+        self._auth_headers: dict[str, str] = {"x-api-key": api_key}
         self._session: aiohttp.ClientSession | None = session
         self._owns_session: bool = session is None
         self._resolved_url: str | None = None
@@ -160,7 +160,7 @@ class UnraidClient:
         self._session = aiohttp.ClientSession(
             connector=connector,
             timeout=timeout_config,
-            headers={"x-api-key": self._api_key},
+            headers=self._auth_headers,
         )
         self._owns_session = True
 
@@ -221,11 +221,9 @@ class UnraidClient:
         http_url = f"http://{clean_host}{http_port_suffix}/graphql"
         _LOGGER.debug("Checking for redirect at %s", http_url)
 
-        headers = {"x-api-key": self._api_key}
-
         try:
             async with self._session.get(
-                http_url, headers=headers, allow_redirects=False
+                http_url, headers=self._auth_headers, allow_redirects=False
             ) as response:
                 _LOGGER.debug("HTTP response status: %d", response.status)
 
@@ -350,11 +348,10 @@ class UnraidClient:
             _LOGGER.debug("Using URL: %s", self._resolved_url)
 
         url = self._resolved_url
-        headers = {"x-api-key": self._api_key}
 
         try:
             async with self._session.post(
-                url, json=payload, headers=headers, allow_redirects=False
+                url, json=payload, headers=self._auth_headers, allow_redirects=False
             ) as response:
                 # Follow redirects if needed
                 if response.status in (301, 302, 307, 308):
@@ -364,7 +361,7 @@ class UnraidClient:
                         async with self._session.post(
                             redirect_url,
                             json=payload,
-                            headers=headers,
+                            headers=self._auth_headers,
                             allow_redirects=False,
                         ) as redirect_response:
                             redirect_response.raise_for_status()
@@ -551,7 +548,7 @@ class UnraidClient:
             json.dumps(
                 {
                     "type": "connection_init",
-                    "payload": {"x-api-key": self._api_key},
+                    "payload": headers,
                 }
             )
         )
@@ -617,12 +614,11 @@ class UnraidClient:
             raise UnraidConnectionError(err_msg)
 
         ws_url = self._get_ws_url()
-        headers = {"x-api-key": self._api_key}
         sub_id = uuid.uuid4().hex[:8]
 
         ws: aiohttp.ClientWebSocketResponse | None = None
         try:
-            ws = await self._ws_connect_and_init(ws_url, headers)
+            ws = await self._ws_connect_and_init(ws_url, self._auth_headers)
 
             # --- subscribe ---
             subscribe_payload: dict[str, Any] = {"query": subscription}
