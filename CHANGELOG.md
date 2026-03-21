@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-03-21
+
 ### Fixed
 
 - **Resolved all CodeQL clear-text logging alerts (#2–#14)** — API key no longer appears in any method that contains logging calls; auth headers are pre-computed once in `__init__` via `self._auth_headers` and referenced by name elsewhere
