@@ -941,7 +941,9 @@ async def _test_ssl_connection(
             verify_ssl=False,
         ) as client:
             redirect_url, use_ssl = await client._discover_redirect_url()
-            print(f"  Discovery: redirect_found={redirect_url is not None}, use_ssl={use_ssl}")
+            redirect_found = redirect_url is not None
+            ssl_enabled = bool(use_ssl)
+            print(f"  Discovery: redirect_found={redirect_found}, use_ssl={ssl_enabled}")
             client._resolved_url = None
             result = await client.test_connection()
             print(f"  test_connection: {result}")
