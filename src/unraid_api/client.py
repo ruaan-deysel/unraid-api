@@ -254,7 +254,7 @@ class UnraidClient:
         )
 
         http_url = f"http://{clean_host}{http_port_suffix}/graphql"
-        _LOGGER.debug("Checking for redirect at %s", http_url)
+        _LOGGER.debug("Checking for redirect at %s", self._sanitize_url(http_url))
 
         try:
             async with self._session.get(
