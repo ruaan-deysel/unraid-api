@@ -188,14 +188,32 @@ class UnraidClient:
 
     @staticmethod
     def _sanitize_url(url: str) -> str:
-        """Remove embedded credentials from URL for safe logging."""
-        parsed = urlparse(url)
-        if parsed.username or parsed.password:
-            netloc = parsed.hostname or ""
-            if parsed.port:
-                netloc += f":{parsed.port}"
-            return parsed._replace(netloc=netloc).geturl()
-        return url
+        """Remove embedded credentials and sensitive components from URL for safe logging."""
+        try:
+            parsed = urlparse(url)
+        except Exception:
+            # If parsing fails, avoid logging the raw value
+            return "<invalid-url>"
+
+        hostname = parsed.hostname or ""
+        port = parsed.port
+        if not hostname:
+            # No usable host component; avoid emitting potentially sensitive data
+            return "<redacted>"
+
+        netloc = hostname
+        if port:
+            netloc += f":{port}"
+
+        # Drop username, password, query parameters and fragment entirely
+        sanitized = parsed._replace(
+            netloc=netloc,
+            path=parsed.path or "",
+            params="",
+            query="",
+            fragment="",
+        )
+        return sanitized.geturl()
 
     async def _discover_redirect_url(self) -> tuple[str | None, bool]:
         """Discover the correct URL and SSL mode for the Unraid server.
