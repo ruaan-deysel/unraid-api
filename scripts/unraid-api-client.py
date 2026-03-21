@@ -960,7 +960,7 @@ async def run_ssl_tests(host: str, api_key: str) -> int:
 
     print("=" * 60)
     print("SSL/TLS DETECTION LIVE TEST")
-    print(f"Host: {_sanitize_host(host)}, HTTP: {http_port}, HTTPS: {https_port}")
+    print(f"HTTP port: {http_port}, HTTPS port: {https_port}")
     print("=" * 60)
 
     results: list[tuple[str, bool]] = []
