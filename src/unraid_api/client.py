@@ -149,7 +149,7 @@ class UnraidClient:
             _LOGGER.warning(
                 "SSL verification disabled for %s. "
                 "Connection is encrypted but server identity is not verified.",
-                self.host,
+                self._get_clean_host(),
             )
         else:
             ssl_context = True
@@ -160,7 +160,6 @@ class UnraidClient:
         self._session = aiohttp.ClientSession(
             connector=connector,
             timeout=timeout_config,
-            headers=self._auth_headers,
         )
         self._owns_session = True
 
@@ -174,11 +173,29 @@ class UnraidClient:
             self._session = None
 
     def _get_clean_host(self) -> str:
-        """Get host without protocol prefix."""
-        clean_host = self.host
-        if "://" in clean_host:
-            clean_host = clean_host.split("://", 1)[1]
-        return clean_host.rstrip("/")
+        """Get host without protocol prefix or embedded credentials."""
+        host = self.host
+        if "://" in host:
+            parsed = urlparse(host)
+            hostname = parsed.hostname or ""
+            if parsed.port:
+                return f"{hostname}:{parsed.port}"
+            return hostname.rstrip("/")
+        # Strip userinfo (user:pass@) if present
+        if "@" in host:
+            host = host.split("@", 1)[1]
+        return host.rstrip("/")
+
+    @staticmethod
+    def _sanitize_url(url: str) -> str:
+        """Remove embedded credentials from URL for safe logging."""
+        parsed = urlparse(url)
+        if parsed.username or parsed.password:
+            netloc = parsed.hostname or ""
+            if parsed.port:
+                netloc += f":{parsed.port}"
+            return parsed._replace(netloc=netloc).geturl()
+        return url
 
     async def _discover_redirect_url(self) -> tuple[str | None, bool]:
         """Discover the correct URL and SSL mode for the Unraid server.
@@ -229,7 +246,10 @@ class UnraidClient:
 
                 if response.status in (301, 302, 307, 308):
                     redirect_url = response.headers.get("Location")
-                    _LOGGER.debug("Redirect location: %s", redirect_url)
+                    _LOGGER.debug(
+                        "Redirect location: %s",
+                        self._sanitize_url(redirect_url) if redirect_url else None,
+                    )
                     if redirect_url:
                         parsed = urlparse(redirect_url)
                         hostname = parsed.hostname
@@ -345,7 +365,7 @@ class UnraidClient:
                         else ""
                     )
                 self._resolved_url = f"{protocol}://{clean_host}{port_suffix}/graphql"
-            _LOGGER.debug("Using URL: %s", self._resolved_url)
+            _LOGGER.debug("Using URL: %s", self._sanitize_url(self._resolved_url))
 
         url = self._resolved_url
 

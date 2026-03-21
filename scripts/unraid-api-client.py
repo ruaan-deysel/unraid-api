@@ -31,6 +31,31 @@ from unraid_api import UnraidClient
 from unraid_api.models import ParityCheck, format_bytes
 
 
+def _sanitize_host(host: str) -> str:
+    """Sanitize host for safe printing (strip embedded credentials)."""
+    if "://" in host:
+        from urllib.parse import urlparse
+        parsed = urlparse(host)
+        return parsed.hostname or "***"
+    if "@" in host:
+        return host.split("@", 1)[1]
+    return host
+
+
+def _sanitize_url(url: str | None) -> str:
+    """Remove embedded credentials from URL for safe printing."""
+    if url is None:
+        return "None"
+    from urllib.parse import urlparse
+    parsed = urlparse(str(url))
+    if parsed.username or parsed.password:
+        netloc = parsed.hostname or ""
+        if parsed.port:
+            netloc += f":{parsed.port}"
+        return parsed._replace(netloc=netloc).geturl()
+    return str(url)
+
+
 def load_env() -> tuple[str, str]:
     """Load host and API key from scripts/.env or environment variables."""
     host = os.environ.get("UNRAID_HOST", "")
@@ -916,10 +941,10 @@ async def _test_ssl_connection(
             verify_ssl=False,
         ) as client:
             redirect_url, use_ssl = await client._discover_redirect_url()
-            print(f"  Discovery: redirect_url={redirect_url}, use_ssl={use_ssl}")
+            print(f"  Discovery: redirect_url={_sanitize_url(redirect_url)}, use_ssl={use_ssl}")
             client._resolved_url = None
             result = await client.test_connection()
-            print(f"  Resolved URL: {client._resolved_url}")
+            print(f"  Resolved URL: {_sanitize_url(client._resolved_url)}")
             print(f"  test_connection: {result}")
             print("  RESULT: PASS")
             return True
@@ -935,7 +960,7 @@ async def run_ssl_tests(host: str, api_key: str) -> int:
 
     print("=" * 60)
     print("SSL/TLS DETECTION LIVE TEST")
-    print(f"Host: {host}, HTTP: {http_port}, HTTPS: {https_port}")
+    print(f"Host: {_sanitize_host(host)}, HTTP: {http_port}, HTTPS: {https_port}")
     print("=" * 60)
 
     results: list[tuple[str, bool]] = []
@@ -1009,7 +1034,7 @@ examples:
     args = parser.parse_args()
 
     host, api_key = load_env()
-    print(f"Host: {host}")
+    print(f"Host: {_sanitize_host(host)}")
     print(f"API Key: {'*' * 8}...{'*' * 4} (loaded)")
     print()
 
