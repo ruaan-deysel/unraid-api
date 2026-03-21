@@ -11,11 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Resolved all CodeQL clear-text logging alerts (#2–#14)** — API key no longer appears in any method that contains logging calls; auth headers are pre-computed once in `__init__` via `self._auth_headers` and referenced by name elsewhere
 - **Redacted API key from test script output** — `scripts/unraid-api-client.py` no longer prints any portion of the API key
+- **Fixed all 5 notification mutation methods** sending incorrectly nested GraphQL mutations ([#24](https://github.com/ruaan-deysel/unraid-api/issues/24))
+  - `archive_notification()` — uses root-level `archiveNotification` instead of `notifications { archive }`
+  - `unarchive_notification()` — uses root-level `unreadNotification` instead of `notifications { unread }`
+  - `delete_notification()` — uses root-level `deleteNotification` with required `type` parameter instead of `notifications { delete }`
+  - `archive_all_notifications()` — uses root-level `archiveAll` with proper sub-selections instead of `notifications { archiveAll }`
+  - `delete_all_notifications()` — uses root-level `deleteArchivedNotifications` instead of `notifications { deleteAll }` (also fixes wrong field name)
+- All notification mutations now include required sub-field selections (`NotificationOverview` fields)
 
 ### Changed
 
 - **Fixed all ruff lint warnings in `scripts/unraid-api-client.py`** — line length (E501), unnecessary lambdas (PLW0108), loop variable overwrite (PLW2901), deprecated `asyncio.TimeoutError` alias (UP041), and unused noqa directives (RUF100)
 - Replaced per-request `headers = {"x-api-key": self._api_key}` construction in `_discover_redirect_url`, `_make_request`, and `subscribe` with shared `self._auth_headers` dict
+- `delete_notification()` now accepts a `notification_type` parameter (`"ARCHIVE"` or `"UNREAD"`, defaults to `"ARCHIVE"`) as required by the Unraid API schema
 
 ## [1.7.0] - 2026-03-19
 
