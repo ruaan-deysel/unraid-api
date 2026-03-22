@@ -113,7 +113,9 @@ class UnraidClient:
         if not (1 <= http_port <= 65535):
             raise ValueError(f"http_port must be between 1 and 65535, got {http_port}")
         if not (1 <= https_port <= 65535):
-            raise ValueError(f"https_port must be between 1 and 65535, got {https_port}")
+            raise ValueError(
+                f"https_port must be between 1 and 65535, got {https_port}"
+            )
         if timeout < 1:
             raise ValueError(f"timeout must be >= 1 second, got {timeout}")
         self.http_port = http_port
@@ -196,10 +198,7 @@ class UnraidClient:
             hostname = parsed.hostname or ""
             if not hostname:
                 return "<redacted-host>"
-            if parsed.port:
-                host = f"{hostname}:{parsed.port}"
-            else:
-                host = hostname
+            host = f"{hostname}:{parsed.port}" if parsed.port else hostname
         else:
             # Non-URL host: strip any userinfo (user:pass@) if present
             host = raw_host
@@ -208,8 +207,8 @@ class UnraidClient:
 
         host = host.rstrip("/")
 
-        # As a final safeguard, avoid logging values that look like opaque secrets.
-       # Heuristic: a single long token without dots or colons is likely not a hostname.
+        # As a final safeguard, avoid logging values that look like secrets.
+        # Long token without dots/colons is likely not a hostname.
         if host and len(host) >= 24 and all(ch not in host for ch in (".", ":", "/")):
             return "<redacted-host>"
 
@@ -217,7 +216,7 @@ class UnraidClient:
 
     @staticmethod
     def _sanitize_url(url: str) -> str:
-        """Remove embedded credentials and sensitive components from URL for safe logging."""
+        """Remove credentials and sensitive components from URL for logging."""
         try:
             parsed = urlparse(url)
         except Exception:
@@ -384,7 +383,7 @@ class UnraidClient:
 
         return (None, True)
 
-    async def _make_request(self, payload: dict[str, Any]) -> dict[str, Any]:
+    async def _make_request(self, payload: dict[str, Any]) -> dict[str, Any]:  # noqa: PLR0915
         """Make a GraphQL request to the Unraid server.
 
         Args:
@@ -2883,51 +2882,61 @@ class UnraidClient:
     # Array Disk Management Methods
     # =========================================================================
 
-    async def add_array_disk(self, disk_id: str) -> dict[str, Any]:
+    async def add_array_disk(
+        self, disk_id: str, *, slot: int | None = None
+    ) -> dict[str, Any]:
         """Add a disk to the array.
 
         Args:
             disk_id: Disk ID to add.
+            slot: Optional slot number for the disk.
 
         Returns:
-            Mutation response data.
+            Mutation response data (UnraidArray).
 
         """
         mutation = """
-            mutation AddArrayDisk($id: PrefixedID!) {
+            mutation AddArrayDisk($input: ArrayDiskInput!) {
                 array {
-                    addDisk(id: $id) {
-                        id
-                        name
-                        status
+                    addDiskToArray(input: $input) {
+                        state
+                        disks { id name status }
                     }
                 }
             }
         """
-        return await self.mutate(mutation, {"id": disk_id})
+        variables: dict[str, Any] = {"input": {"id": disk_id}}
+        if slot is not None:
+            variables["input"]["slot"] = slot
+        return await self.mutate(mutation, variables)
 
-    async def remove_array_disk(self, disk_id: str) -> dict[str, Any]:
+    async def remove_array_disk(
+        self, disk_id: str, *, slot: int | None = None
+    ) -> dict[str, Any]:
         """Remove a disk from the array.
 
         Args:
             disk_id: Disk ID to remove.
+            slot: Optional slot number of the disk.
 
         Returns:
-            Mutation response data.
+            Mutation response data (UnraidArray).
 
         """
         mutation = """
-            mutation RemoveArrayDisk($id: PrefixedID!) {
+            mutation RemoveArrayDisk($input: ArrayDiskInput!) {
                 array {
-                    removeDisk(id: $id) {
-                        id
-                        name
-                        status
+                    removeDiskFromArray(input: $input) {
+                        state
+                        disks { id name status }
                     }
                 }
             }
         """
-        return await self.mutate(mutation, {"id": disk_id})
+        variables: dict[str, Any] = {"input": {"id": disk_id}}
+        if slot is not None:
+            variables["input"]["slot"] = slot
+        return await self.mutate(mutation, variables)
 
     async def clear_disk_stats(self, disk_id: str) -> dict[str, Any]:
         """Clear statistics for an array disk.
@@ -2936,16 +2945,13 @@ class UnraidClient:
             disk_id: Disk ID to clear statistics for.
 
         Returns:
-            Mutation response data.
+            Mutation response with boolean result.
 
         """
         mutation = """
             mutation ClearDiskStats($id: PrefixedID!) {
                 array {
-                    clearStatistics(id: $id) {
-                        id
-                        name
-                    }
+                    clearArrayDiskStatistics(id: $id)
                 }
             }
         """

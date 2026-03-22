@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Fixed 3 array disk mutation methods** with incorrect GraphQL field names that would fail with HTTP 400 on Unraid 7.2.4+ (API v4.30.x)
+  - `add_array_disk()` — uses `addDiskToArray(input: $input)` with `ArrayDiskInput` instead of non-existent `addDisk(id: $id)`; also added optional `slot` parameter
+  - `remove_array_disk()` — uses `removeDiskFromArray(input: $input)` with `ArrayDiskInput` instead of non-existent `removeDisk(id: $id)`; also added optional `slot` parameter
+  - `clear_disk_stats()` — uses `clearArrayDiskStatistics(id: $id)` returning `Boolean` instead of non-existent `clearStatistics(id: $id)`
+
+### Added
+
+- **Schema cross-check validation script** (`scripts/validate-schema.py`) — three-way cross-check validator that validates client queries against the live Unraid server schema and the official GitHub schema from `github.com/unraid/api`
+
 ## [1.7.1] - 2026-03-21
 
 ### Fixed

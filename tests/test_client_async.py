@@ -3872,6 +3872,7 @@ class TestArrayDiskManagementMethods:
 
     async def test_add_array_disk(self) -> None:
         """Test adding a disk to the array."""
+        disk = {"id": "disk:sdb", "name": "disk1", "status": "DISK_OK"}
         with aioresponses() as m:
             m.get("http://192.168.1.100/graphql", status=400)
             m.post(
@@ -3879,10 +3880,9 @@ class TestArrayDiskManagementMethods:
                 payload={
                     "data": {
                         "array": {
-                            "addDisk": {
-                                "id": "disk:sdb",
-                                "name": "disk1",
-                                "status": "active",
+                            "addDiskToArray": {
+                                "state": "STARTED",
+                                "disks": [disk],
                             }
                         }
                     }
@@ -3894,7 +3894,33 @@ class TestArrayDiskManagementMethods:
             ) as client:
                 result = await client.add_array_disk("disk:sdb")
 
-                assert result["array"]["addDisk"]["id"] == "disk:sdb"
+                assert result["array"]["addDiskToArray"]["state"] == "STARTED"
+
+    async def test_add_array_disk_with_slot(self) -> None:
+        """Test adding a disk to the array with a slot parameter."""
+        disk = {"id": "disk:sdb", "name": "disk1", "status": "DISK_OK"}
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "array": {
+                            "addDiskToArray": {
+                                "state": "STARTED",
+                                "disks": [disk],
+                            }
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.add_array_disk("disk:sdb", slot=3)
+
+                assert result["array"]["addDiskToArray"]["state"] == "STARTED"
 
     async def test_remove_array_disk(self) -> None:
         """Test removing a disk from the array."""
@@ -3905,10 +3931,9 @@ class TestArrayDiskManagementMethods:
                 payload={
                     "data": {
                         "array": {
-                            "removeDisk": {
-                                "id": "disk:sdb",
-                                "name": "disk1",
-                                "status": "unassigned",
+                            "removeDiskFromArray": {
+                                "state": "STOPPED",
+                                "disks": [],
                             }
                         }
                     }
@@ -3920,10 +3945,10 @@ class TestArrayDiskManagementMethods:
             ) as client:
                 result = await client.remove_array_disk("disk:sdb")
 
-                assert "removeDisk" in result["array"]
+                assert "removeDiskFromArray" in result["array"]
 
-    async def test_clear_disk_stats(self) -> None:
-        """Test clearing disk statistics."""
+    async def test_remove_array_disk_with_slot(self) -> None:
+        """Test removing a disk from the array with a slot parameter."""
         with aioresponses() as m:
             m.get("http://192.168.1.100/graphql", status=400)
             m.post(
@@ -3931,7 +3956,10 @@ class TestArrayDiskManagementMethods:
                 payload={
                     "data": {
                         "array": {
-                            "clearStatistics": {"id": "disk:sdb", "name": "disk1"}
+                            "removeDiskFromArray": {
+                                "state": "STOPPED",
+                                "disks": [],
+                            }
                         }
                     }
                 },
@@ -3940,9 +3968,25 @@ class TestArrayDiskManagementMethods:
             async with UnraidClient(
                 "192.168.1.100", "test-key", verify_ssl=False
             ) as client:
+                result = await client.remove_array_disk("disk:sdb", slot=5)
+
+                assert "removeDiskFromArray" in result["array"]
+
+    async def test_clear_disk_stats(self) -> None:
+        """Test clearing disk statistics."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={"data": {"array": {"clearArrayDiskStatistics": True}}},
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
                 result = await client.clear_disk_stats("disk:sdb")
 
-                assert "clearStatistics" in result["array"]
+                assert result["array"]["clearArrayDiskStatistics"] is True
 
 
 class TestRestartContainerMethod:
