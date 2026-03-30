@@ -657,6 +657,92 @@ async def run_query_tests(client: UnraidClient) -> int:  # noqa: PLR0915
         t.record("boot_devices", f"FAIL: {e}")
         print(f"✗ boot_devices: {e}")
 
+    # --- Issue #38: Missing Memory Fields ---
+    t.section("Issue #38: Missing Memory Fields (active, buffcache, swapFree)")
+
+    # 55. Memory fields in get_system_metrics
+    try:
+        m = await client.get_system_metrics()
+        has_active = m.memory_active is not None
+        has_buffcache = m.memory_buffcache is not None
+        has_swap_free = m.swap_free is not None
+        t.record("memory_active_buffcache_swapfree", "PASS")
+        print(
+            f"✓ memory fields:"
+            f" active={format_bytes(m.memory_active)},"
+            f" buffcache={format_bytes(m.memory_buffcache)},"
+            f" swapFree={format_bytes(m.swap_free)}"
+        )
+        if not has_active:
+            print("  ⚠ active field is None (server may not support it)")
+        if not has_buffcache:
+            print("  ⚠ buffcache field is None (server may not support it)")
+        if not has_swap_free:
+            print("  ⚠ swapFree field is None (may be 0 if no swap)")
+    except Exception as e:
+        t.record("memory_active_buffcache_swapfree", f"FAIL: {e}")
+        print(f"✗ memory fields: {e}")
+
+    # --- Issue #37: Temperature Monitoring ---
+    t.section("Issue #37: Temperature Monitoring (metrics.temperature)")
+
+    # 56. Temperature via get_system_metrics
+    try:
+        m = await client.get_system_metrics()
+        if m.temperature:
+            sensor_count = len(m.temperature.sensors)
+            avg = m.temperature.summary.average if m.temperature.summary else None
+            t.record("system_metrics_temperature", "PASS")
+            print(
+                f"✓ system_metrics temperature:"
+                f" {sensor_count} sensors, avg={avg}"
+            )
+        else:
+            t.record("system_metrics_temperature", "PASS (no temp data)")
+            print("✓ system_metrics temperature: no data (server may not support it)")
+    except Exception as e:
+        t.record("system_metrics_temperature", f"FAIL: {e}")
+        print(f"✗ system_metrics temperature: {e}")
+
+    # 57. Dedicated get_temperature_metrics
+    try:
+        temp = await client.get_temperature_metrics()
+        t.record("get_temperature_metrics", "PASS")
+        print(f"✓ get_temperature_metrics: {len(temp.sensors)} sensors")
+        if temp.summary:
+            hottest_name = temp.summary.hottest.name if temp.summary.hottest else "N/A"
+            coolest_name = temp.summary.coolest.name if temp.summary.coolest else "N/A"
+            print(
+                f"  → avg={temp.summary.average},"
+                f" warnings={temp.summary.warningCount},"
+                f" critical={temp.summary.criticalCount}"
+            )
+            print(f"  → hottest={hottest_name}, coolest={coolest_name}")
+        for s in temp.sensors[:5]:
+            val = s.temperature
+            status = s.current.status if s.current else "N/A"
+            print(f"  → {s.name}: {val}°C ({s.type}) [{status}]")
+        if len(temp.sensors) > 5:
+            print(f"  → ... and {len(temp.sensors) - 5} more sensors")
+    except Exception as e:
+        t.record("get_temperature_metrics", f"FAIL: {e}")
+        print(f"✗ get_temperature_metrics: {e}")
+
+    # 58. Temperature sensor type filtering
+    try:
+        temp = await client.get_temperature_metrics()
+        disk_count = len(temp.disk_sensors)
+        nvme_count = len(temp.nvme_sensors)
+        cpu_count = len(temp.cpu_sensors)
+        t.record("temperature_sensor_filtering", "PASS")
+        print(
+            f"✓ temperature sensor filtering:"
+            f" disk={disk_count}, nvme={nvme_count}, cpu={cpu_count}"
+        )
+    except Exception as e:
+        t.record("temperature_sensor_filtering", f"FAIL: {e}")
+        print(f"✗ temperature sensor filtering: {e}")
+
     return t.summary()
 
 
@@ -909,6 +995,23 @@ async def run_subscription_tests(client: UnraidClient) -> int:  # noqa: PLR0915
                 print("   PASS (connected, no events in 10s)")
     except Exception as e:
         t.record("subscribe_raw", f"FAIL: {e}")
+        print(f"   FAIL: {e}")
+
+    # 8. Temperature subscription
+    try:
+        print("\n8. subscribe_temperature_metrics()...")
+        count = 0
+        async for temp in client.subscribe_temperature_metrics():
+            sensor_count = len(temp.sensors)
+            avg = temp.summary.average if temp.summary else "N/A"
+            print(f"   Temperature: {sensor_count} sensors, avg={avg}")
+            count += 1
+            if count >= 2:
+                break
+        t.record("subscribe_temperature_metrics", "PASS")
+        print("   PASS")
+    except Exception as e:
+        t.record("subscribe_temperature_metrics", f"FAIL: {e}")
         print(f"   FAIL: {e}")
 
     return t.summary()

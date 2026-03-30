@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`unraid-api` is an async Python client library for Unraid's GraphQL API (v4.21.0+, Unraid 7.1.4+). Primary consumer is the [ha-unraid](https://github.com/ruaan-deysel/ha-unraid) Home Assistant integration.
+`unraid-api` is an async Python client library for Unraid's GraphQL API. Primary consumer is the [ha-unraid](https://github.com/ruaan-deysel/ha-unraid) Home Assistant integration.
 
 ## Development Commands
 

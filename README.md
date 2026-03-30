@@ -213,13 +213,14 @@ async with UnraidClient(host, api_key) as client:
 | `typed_get_plugins()` | `list[Plugin]` | Installed API plugins |
 | `typed_get_docker_networks()` | `list[DockerNetwork]` | Docker networks |
 | `typed_get_log_files()` | `list[LogFile]` | Available log files |
-| `typed_get_cloud()` | `Cloud` | Unraid Connect cloud status |
-| `typed_get_connect()` | `Connect` | Connect configuration |
-| `typed_get_remote_access()` | `RemoteAccess` | Remote access settings |
+| `typed_get_cloud()` | `Cloud` | ⚠️ **Deprecated** — Cloud status |
+| `typed_get_connect()` | `Connect` | ⚠️ **Deprecated** — Connect configuration |
+| `typed_get_remote_access()` | `RemoteAccess` | ⚠️ **Deprecated** — Remote access settings |
 | `get_container_update_statuses()` | `list[ContainerUpdateStatus]` | Docker container update availability |
 | `get_ups_configuration()` | `UPSConfiguration` | UPS hardware/software configuration |
 | `get_display_settings()` | `DisplaySettings` | Display and temperature settings |
 | `get_docker_port_conflicts()` | `DockerPortConflicts` | Docker LAN port conflicts |
+| `get_temperature_metrics()` | `TemperatureMetrics` | Temperature sensors, thresholds, summary |
 
 #### Raw Data Methods
 
@@ -271,13 +272,14 @@ async with UnraidClient(host, api_key) as client:
 | `subscribe_memory_metrics()` | `MemoryMetrics` | System memory usage |
 | `subscribe_ups_updates()` | `dict` | UPS state changes (raw) |
 | `subscribe_array_updates()` | `ArraySubscriptionUpdate` | Array state and capacity changes |
+| `subscribe_temperature_metrics()` | `TemperatureMetrics` | Temperature sensor updates |
 
 ### Models
 
 #### System Models
 - `ServerInfo` - Server info for HA device registration
 - `SystemInfo` - System information
-- `SystemMetrics` - CPU, memory, temperature, power, uptime metrics
+- `SystemMetrics` - CPU, memory, temperature, power, uptime metrics (includes `TemperatureMetrics`)
 - `Vars` - System configuration variables
 - `Registration` - License/registration info
 - `Flash` - Flash drive information
@@ -287,13 +289,14 @@ async with UnraidClient(host, api_key) as client:
 - `UnraidArray` - Array state and disks
 - `ArrayDisk` - Individual array disk
 - `ArrayCapacity` - Capacity calculations
-- `PhysicalDisk` - Physical disk details
-- `Share` - User share with usage
+- `PhysicalDisk` - Physical disk details (serialNum, firmwareRevision, partitions)
+- `DiskPartition` - Disk partition info (name, fsType, size)
+- `Share` - User share with usage and comment
 
 #### Docker/VM Models
 - `DockerContainer` - Container with ports, state, mounts, Tailscale, template ports
 - `DockerNetwork` - Docker network configuration
-- `VmDomain` - Virtual machine details
+- `VmDomain` - Virtual machine (id, name, state)
 - `TailscaleStatus` - Tailscale hostname, DNS name, and online status
 - `ContainerTemplatePort` - Template port configuration
 - `ContainerUpdateStatus` - Container update availability
@@ -309,22 +312,32 @@ async with UnraidClient(host, api_key) as client:
 - `DisplaySettings` - Display and temperature threshold settings
 - `KeyFile` - Registration key file location and contents
 
-#### Network Models
-- `Cloud` - Unraid Connect cloud status
-- `Connect` - Connect configuration
-- `RemoteAccess` - Remote access settings
+#### Network Models (Deprecated)
+
+- `Cloud` - Unraid Connect cloud status *(deprecated — removed from live API)*
+- `Connect` - Connect configuration *(deprecated — removed from live API)*
+- `RemoteAccess` - Remote access settings *(deprecated — removed from live API)*
 
 #### Notification Models
-- `Notification` - System notification
+- `Notification` - System notification (with link, type, formattedTimestamp)
 - `NotificationOverview` - Notification counts
+- `NotificationOverviewCounts` - Per-importance notification counts
 
 #### Subscription Models
-- `CpuCore` - Per-core CPU usage
+- `CpuCore` - Per-core CPU usage (percentTotal, percentUser, percentSystem, percentIdle, percentNice, percentIrq, percentGuest, percentSteal)
 - `CpuMetrics` - CPU usage with per-core breakdown
 - `CpuTelemetryMetrics` - CPU power and temperature
+- `MemoryUtilization` - Full memory data (total, used, free, available, active, buffcache, swap)
 - `MemoryMetrics` - System memory total/used/free
 - `ArraySubscriptionUpdate` - Array state and capacity updates
 - `DockerContainerStats` - Real-time container resource metrics
+- `TemperatureMetrics` - Temperature sensors with summary and per-sensor data
+- `TemperatureSensor` - Individual sensor with reading, thresholds, and status helpers
+- `TemperatureReading` - Temperature value, unit, and status
+- `TemperatureSummary` - Average, hottest, coolest, warning/critical counts
+- `SensorType` - Enum: CPU_PACKAGE, CPU_CORE, DISK, NVME, CUSTOM
+- `TemperatureUnit` - Enum: CELSIUS, FAHRENHEIT
+- `TemperatureStatus` - Enum: NORMAL, WARNING, CRITICAL, UNKNOWN
 
 ### Exceptions
 

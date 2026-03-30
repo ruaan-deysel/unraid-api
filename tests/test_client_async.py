@@ -3515,10 +3515,10 @@ class TestGetArrayDisksMethod:
 
 
 class TestGetCloudMethod:
-    """Tests for get_cloud and typed_get_cloud methods."""
+    """Tests for get_cloud and typed_get_cloud (deprecated) methods."""
 
     async def test_get_cloud(self) -> None:
-        """Test getting cloud settings."""
+        """Test getting cloud settings emits deprecation warning."""
         with aioresponses() as m:
             m.get("http://192.168.1.100/graphql", status=400)
             m.post(
@@ -3540,12 +3540,13 @@ class TestGetCloudMethod:
             async with UnraidClient(
                 "192.168.1.100", "test-key", verify_ssl=False
             ) as client:
-                result = await client.get_cloud()
+                with pytest.warns(DeprecationWarning, match="get_cloud"):
+                    result = await client.get_cloud()
 
                 assert result["cloud"]["status"] == "ok"
 
     async def test_typed_get_cloud(self) -> None:
-        """Test getting cloud settings as Pydantic model."""
+        """Test getting cloud settings as Pydantic model emits deprecation."""
         from unraid_api.models import Cloud
 
         with aioresponses() as m:
@@ -3569,7 +3570,8 @@ class TestGetCloudMethod:
             async with UnraidClient(
                 "192.168.1.100", "test-key", verify_ssl=False
             ) as client:
-                result = await client.typed_get_cloud()
+                with pytest.warns(DeprecationWarning, match="typed_get_cloud"):
+                    result = await client.typed_get_cloud()
 
                 assert isinstance(result, Cloud)
                 assert result.cloud is not None
@@ -3577,10 +3579,10 @@ class TestGetCloudMethod:
 
 
 class TestGetConnectMethod:
-    """Tests for get_connect and typed_get_connect methods."""
+    """Tests for get_connect and typed_get_connect (deprecated) methods."""
 
     async def test_get_connect(self) -> None:
-        """Test getting Unraid Connect information."""
+        """Test getting Connect information emits deprecation warning."""
         with aioresponses() as m:
             m.get("http://192.168.1.100/graphql", status=400)
             m.post(
@@ -3602,12 +3604,13 @@ class TestGetConnectMethod:
             async with UnraidClient(
                 "192.168.1.100", "test-key", verify_ssl=False
             ) as client:
-                result = await client.get_connect()
+                with pytest.warns(DeprecationWarning, match="get_connect"):
+                    result = await client.get_connect()
 
                 assert result["dynamicRemoteAccess"]["enabledType"] == "UPNP"
 
     async def test_typed_get_connect(self) -> None:
-        """Test getting Connect as Pydantic model."""
+        """Test getting Connect as Pydantic model emits deprecation."""
         from unraid_api.models import Connect
 
         with aioresponses() as m:
@@ -3631,7 +3634,8 @@ class TestGetConnectMethod:
             async with UnraidClient(
                 "192.168.1.100", "test-key", verify_ssl=False
             ) as client:
-                result = await client.typed_get_connect()
+                with pytest.warns(DeprecationWarning, match="typed_get_connect"):
+                    result = await client.typed_get_connect()
 
                 assert isinstance(result, Connect)
                 assert result.dynamicRemoteAccess is not None
@@ -3639,10 +3643,10 @@ class TestGetConnectMethod:
 
 
 class TestGetRemoteAccessMethod:
-    """Tests for get_remote_access and typed_get_remote_access methods."""
+    """Tests for get_remote_access and typed (deprecated) methods."""
 
     async def test_get_remote_access(self) -> None:
-        """Test getting remote access configuration."""
+        """Test getting remote access emits deprecation warning."""
         with aioresponses() as m:
             m.get("http://192.168.1.100/graphql", status=400)
             m.post(
@@ -3661,13 +3665,14 @@ class TestGetRemoteAccessMethod:
             async with UnraidClient(
                 "192.168.1.100", "test-key", verify_ssl=False
             ) as client:
-                result = await client.get_remote_access()
+                with pytest.warns(DeprecationWarning, match="get_remote_access"):
+                    result = await client.get_remote_access()
 
                 assert result["accessType"] == "ALWAYS"
                 assert result["port"] == 443
 
     async def test_typed_get_remote_access(self) -> None:
-        """Test getting remote access as Pydantic model."""
+        """Test getting remote access model emits deprecation."""
         from unraid_api.models import RemoteAccess
 
         with aioresponses() as m:
@@ -3688,7 +3693,11 @@ class TestGetRemoteAccessMethod:
             async with UnraidClient(
                 "192.168.1.100", "test-key", verify_ssl=False
             ) as client:
-                result = await client.typed_get_remote_access()
+                with pytest.warns(
+                    DeprecationWarning,
+                    match="typed_get_remote_access",
+                ):
+                    result = await client.typed_get_remote_access()
 
                 assert isinstance(result, RemoteAccess)
                 assert result.accessType == "DISABLED"
@@ -4516,7 +4525,7 @@ class TestCheckCompatibility:
                 payload={
                     "data": {
                         "info": {
-                            "versions": {"core": {"unraid": "7.2.3", "api": "4.29.2"}}
+                            "versions": {"core": {"unraid": "7.2.4", "api": "4.31.1"}}
                         }
                     }
                 },
@@ -4526,8 +4535,8 @@ class TestCheckCompatibility:
                 "192.168.1.100", "test-key", verify_ssl=False
             ) as client:
                 result = await client.check_compatibility()
-                assert result.unraid == "7.2.3"
-                assert result.api == "4.29.2"
+                assert result.unraid == "7.2.4"
+                assert result.api == "4.31.1"
 
     async def test_incompatible_api_version(self) -> None:
         """Test check_compatibility raises for old API version."""
@@ -4563,7 +4572,7 @@ class TestCheckCompatibility:
                 payload={
                     "data": {
                         "info": {
-                            "versions": {"core": {"unraid": "6.0.0", "api": "4.29.2"}}
+                            "versions": {"core": {"unraid": "6.0.0", "api": "4.31.1"}}
                         }
                     }
                 },
@@ -4854,3 +4863,323 @@ class TestGetDockerPortConflictsMethod:
 
                 assert isinstance(result, DockerPortConflicts)
                 assert result.lanPorts == []
+
+
+class TestGetTemperatureMetricsMethod:
+    """Tests for get_temperature_metrics method."""
+
+    async def test_get_temperature_metrics(self) -> None:
+        """Test getting temperature metrics returns TemperatureMetrics."""
+        from unraid_api.models import TemperatureMetrics
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "metrics": {
+                            "temperature": {
+                                "id": "temp:1",
+                                "summary": {
+                                    "average": 35.0,
+                                    "hottest": {
+                                        "name": "CPU",
+                                        "current": {
+                                            "value": 55.0,
+                                            "unit": "CELSIUS",
+                                        },
+                                    },
+                                    "coolest": {
+                                        "name": "SSD",
+                                        "current": {
+                                            "value": 25.0,
+                                            "unit": "CELSIUS",
+                                        },
+                                    },
+                                    "warningCount": 0,
+                                    "criticalCount": 0,
+                                },
+                                "sensors": [
+                                    {
+                                        "id": "disk:1",
+                                        "name": "ST8000VN004",
+                                        "type": "DISK",
+                                        "location": None,
+                                        "current": {
+                                            "value": 30.0,
+                                            "unit": "CELSIUS",
+                                            "status": "NORMAL",
+                                        },
+                                        "min": {
+                                            "value": 28.0,
+                                            "unit": "CELSIUS",
+                                        },
+                                        "max": {
+                                            "value": 35.0,
+                                            "unit": "CELSIUS",
+                                        },
+                                        "warning": 50,
+                                        "critical": 60,
+                                    }
+                                ],
+                            }
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_temperature_metrics()
+
+                assert isinstance(result, TemperatureMetrics)
+                assert result.id == "temp:1"
+                assert result.summary is not None
+                assert result.summary.average == 35.0
+                assert len(result.sensors) == 1
+                assert result.sensors[0].name == "ST8000VN004"
+                assert result.sensors[0].temperature == 30.0
+
+    async def test_get_temperature_metrics_empty(self) -> None:
+        """Test get_temperature_metrics with empty response."""
+        from unraid_api.models import TemperatureMetrics
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={"data": {"metrics": {}}},
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_temperature_metrics()
+
+                assert isinstance(result, TemperatureMetrics)
+                assert result.id is None
+                assert result.sensors == []
+
+
+class TestGetMetricsAuditFields:
+    """Tests verifying get_metrics() returns active, buffcache, and per-cpu fields."""
+
+    async def test_get_metrics_memory_active_buffcache(self) -> None:
+        """Test get_metrics includes active and buffcache memory fields."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "metrics": {
+                            "cpu": {"percentTotal": 25.0, "cpus": []},
+                            "memory": {
+                                "total": 16000000000,
+                                "used": 8000000000,
+                                "free": 8000000000,
+                                "available": 12000000000,
+                                "active": 6094684160,
+                                "buffcache": 29019455488,
+                                "percentTotal": 50.0,
+                                "swapTotal": 4000000000,
+                                "swapUsed": 1000000000,
+                                "swapFree": 3000000000,
+                                "percentSwapTotal": 25.0,
+                            },
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_metrics()
+
+                assert result["memory"]["active"] == 6094684160
+                assert result["memory"]["buffcache"] == 29019455488
+
+    async def test_get_metrics_per_cpu_fields(self) -> None:
+        """Test get_metrics returns all per-cpu fields."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "metrics": {
+                            "cpu": {
+                                "percentTotal": 25.0,
+                                "cpus": [
+                                    {
+                                        "percentTotal": 30.0,
+                                        "percentUser": 20.0,
+                                        "percentSystem": 8.0,
+                                        "percentIdle": 70.0,
+                                        "percentNice": 0.5,
+                                        "percentIrq": 0.1,
+                                        "percentGuest": 0.0,
+                                        "percentSteal": 0.0,
+                                    }
+                                ],
+                            },
+                            "memory": {"total": 16000000000},
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_metrics()
+
+                cpu = result["cpu"]["cpus"][0]
+                assert cpu["percentNice"] == 0.5
+                assert cpu["percentIrq"] == 0.1
+                assert cpu["percentGuest"] == 0.0
+                assert cpu["percentSteal"] == 0.0
+
+
+class TestGetNotificationsAuditFields:
+    """Tests verifying get_notifications() returns link, type, formattedTimestamp."""
+
+    async def test_get_notifications_all_fields(self) -> None:
+        """Test get_notifications includes link, type, formattedTimestamp."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "notifications": {
+                            "overview": {
+                                "unread": {
+                                    "info": 1,
+                                    "warning": 0,
+                                    "alert": 0,
+                                    "total": 1,
+                                },
+                                "archive": {
+                                    "info": 0,
+                                    "warning": 0,
+                                    "alert": 0,
+                                    "total": 0,
+                                },
+                            },
+                            "list": [
+                                {
+                                    "id": "n:1",
+                                    "title": "Test",
+                                    "subject": "Subject",
+                                    "description": "Desc",
+                                    "importance": "info",
+                                    "link": "https://example.com/info",
+                                    "type": "UNREAD",
+                                    "timestamp": "2024-01-01T00:00:00Z",
+                                    "formattedTimestamp": "Jan 1, 2024 12:00 AM",
+                                }
+                            ],
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_notifications()
+
+                notif = result["list"][0]
+                assert notif["link"] == "https://example.com/info"
+                assert notif["type"] == "UNREAD"
+                assert notif["formattedTimestamp"] == "Jan 1, 2024 12:00 AM"
+
+
+class TestGetPhysicalDisksAuditFields:
+    """Tests for get_physical_disks() extended fields."""
+
+    async def test_get_physical_disks_extended_fields(self) -> None:
+        """Test get_physical_disks includes serialNum, firmwareRevision, partitions."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "disks": [
+                            {
+                                "id": "disk:sda",
+                                "device": "sda",
+                                "name": "WDC WD40EFAX",
+                                "vendor": "WDC",
+                                "size": 4000787030016,
+                                "type": "HDD",
+                                "interfaceType": "SATA",
+                                "temperature": 35.0,
+                                "isSpinning": True,
+                                "serialNum": "WD-WX11A12B3456",
+                                "firmwareRevision": "83.00A83",
+                                "partitions": [
+                                    {
+                                        "name": "sda1",
+                                        "fsType": "xfs",
+                                        "size": 4000785088512,
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_physical_disks()
+
+                disk = result[0]
+                assert disk["serialNum"] == "WD-WX11A12B3456"
+                assert disk["firmwareRevision"] == "83.00A83"
+                assert len(disk["partitions"]) == 1
+                assert disk["partitions"][0]["name"] == "sda1"
+
+
+class TestTypedGetSharesCommentField:
+    """Tests verifying typed_get_shares() queries and returns comment field."""
+
+    async def test_typed_get_shares_comment(self) -> None:
+        """Test typed_get_shares includes comment in results."""
+        from unraid_api.models import Share
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "shares": [
+                            {
+                                "id": "share:appdata",
+                                "name": "appdata",
+                                "comment": "Application data storage",
+                                "size": 0,
+                                "used": 50000000,
+                                "free": 100000000,
+                            },
+                        ]
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.typed_get_shares()
+
+                assert len(result) == 1
+                assert isinstance(result[0], Share)
+                assert result[0].comment == "Application data storage"

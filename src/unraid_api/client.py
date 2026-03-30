@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import sys
 import uuid
+import warnings
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse, urlunparse
 
@@ -50,6 +53,7 @@ if TYPE_CHECKING:
         Service,
         Share,
         SystemMetrics,
+        TemperatureMetrics,
         UnraidArray,
         UPSConfiguration,
         UPSDevice,
@@ -127,6 +131,13 @@ class UnraidClient:
         self._owns_session: bool = session is None
         self._resolved_url: str | None = None
 
+    def __repr__(self) -> str:
+        """Safe repr that never exposes the API key."""
+        return (
+            f"UnraidClient(host={self._get_clean_host()!r}, "
+            f"port={self.https_port}, verify_ssl={self.verify_ssl})"
+        )
+
     @property
     def session(self) -> aiohttp.ClientSession | None:
         """Get the aiohttp session."""
@@ -162,8 +173,22 @@ class UnraidClient:
         else:
             ssl_context = True
 
-        connector = aiohttp.TCPConnector(ssl=ssl_context, force_close=False)
-        timeout_config = aiohttp.ClientTimeout(total=self.timeout)
+        connector_kwargs: dict[str, Any] = {
+            "ssl": ssl_context,
+            "force_close": False,
+            "limit": 10,
+            "limit_per_host": 5,
+        }
+        # enable_cleanup_closed was fixed in CPython 3.14 and is a no-op there
+        if sys.version_info < (3, 14):
+            connector_kwargs["enable_cleanup_closed"] = True
+        connector = aiohttp.TCPConnector(**connector_kwargs)
+        timeout_config = aiohttp.ClientTimeout(
+            total=self.timeout,
+            connect=min(10, self.timeout),
+            sock_connect=min(10, self.timeout),
+            sock_read=self.timeout,
+        )
 
         self._session = aiohttp.ClientSession(
             connector=connector,
@@ -176,6 +201,8 @@ class UnraidClient:
         if self._session is not None and self._owns_session:
             try:
                 await self._session.close()
+                # Allow underlying connections to close cleanly
+                await asyncio.sleep(0)
             except Exception:
                 _LOGGER.debug("Error closing session", exc_info=True)
             self._session = None
@@ -285,9 +312,7 @@ class UnraidClient:
         _LOGGER.debug("Checking for redirect at %s", self._sanitize_url(http_url))
 
         try:
-            async with self._session.get(
-                http_url, headers=self._auth_headers, allow_redirects=False
-            ) as response:
+            async with self._session.get(http_url, allow_redirects=False) as response:
                 _LOGGER.debug("HTTP response status: %d", response.status)
 
                 if response.status in (301, 302, 307, 308):
@@ -634,6 +659,8 @@ class UnraidClient:
                 ws_url,
                 protocols=["graphql-transport-ws"],
                 headers=headers,
+                max_msg_size=16 * 1024 * 1024,
+                receive_timeout=self.timeout * 10,
             )
         except TimeoutError as err:
             raise UnraidTimeoutError(f"WebSocket connection timed out: {err}") from err
@@ -912,8 +939,26 @@ class UnraidClient:
                 metrics {
                     cpu { percentTotal }
                     memory {
-                        total used free available percentTotal
-                        swapTotal swapUsed percentSwapTotal
+                        total used free available active buffcache
+                        percentTotal
+                        swapTotal swapUsed swapFree percentSwapTotal
+                    }
+                    temperature {
+                        id
+                        summary {
+                            average
+                            hottest { name current { value unit } }
+                            coolest { name current { value unit } }
+                            warningCount
+                            criticalCount
+                        }
+                        sensors {
+                            id name type location
+                            current { value unit status }
+                            min { value unit }
+                            max { value unit }
+                            warning critical
+                        }
                     }
                 }
                 info {
@@ -924,6 +969,45 @@ class UnraidClient:
         """
         result = await self.query(query_str)
         return SystemMetrics.from_response(result)
+
+    async def get_temperature_metrics(self) -> TemperatureMetrics:
+        """Get temperature metrics from all sensors.
+
+        Returns temperature data from lm_sensors, smartctl, and IPMI
+        providers including per-sensor readings, thresholds, and summary.
+
+        Returns:
+            TemperatureMetrics model with summary and sensor data.
+
+        """
+        from unraid_api.models import TemperatureMetrics
+
+        query_str = """
+            query {
+                metrics {
+                    temperature {
+                        id
+                        summary {
+                            average
+                            hottest { name current { value unit } }
+                            coolest { name current { value unit } }
+                            warningCount
+                            criticalCount
+                        }
+                        sensors {
+                            id name type location
+                            current { value unit status }
+                            min { value unit }
+                            max { value unit }
+                            warning critical
+                        }
+                    }
+                }
+            }
+        """
+        result = await self.query(query_str)
+        temp_data = (result.get("metrics") or {}).get("temperature") or {}
+        return TemperatureMetrics(**temp_data)
 
     async def typed_get_containers(self) -> list[DockerContainer]:
         """Get all Docker containers as Pydantic models.
@@ -1156,6 +1240,7 @@ class UnraidClient:
                     cow
                     color
                     luksStatus
+                    comment
                 }
             }
         """
@@ -1807,6 +1892,10 @@ class UnraidClient:
                             percentUser
                             percentSystem
                             percentIdle
+                            percentNice
+                            percentIrq
+                            percentGuest
+                            percentSteal
                         }
                     }
                     memory {
@@ -1814,6 +1903,8 @@ class UnraidClient:
                         used
                         free
                         available
+                        active
+                        buffcache
                         percentTotal
                         swapTotal
                         swapUsed
@@ -2049,7 +2140,10 @@ class UnraidClient:
                         subject
                         description
                         importance
+                        link
+                        type
                         timestamp
+                        formattedTimestamp
                     }
                 }
             }
@@ -2128,6 +2222,9 @@ class UnraidClient:
                     interfaceType
                     temperature
                     isSpinning
+                    serialNum
+                    firmwareRevision
+                    partitions {{ name fsType size }}
                     {smart_fields}
                 }}
             }}
@@ -2653,10 +2750,21 @@ class UnraidClient:
     async def get_cloud(self) -> dict[str, Any]:
         """Get cloud settings information.
 
+        .. deprecated::
+            The ``cloud`` query was removed from the Unraid GraphQL API.
+            This method will be removed in a future release.
+
         Returns:
             Cloud settings data dictionary.
 
         """
+        warnings.warn(
+            "get_cloud() is deprecated: the 'cloud' query was removed "
+            "from the Unraid GraphQL API and this method will be "
+            "removed in a future release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         query_str = """
             query {
                 cloud {
@@ -2675,10 +2783,21 @@ class UnraidClient:
     async def typed_get_cloud(self) -> Cloud:
         """Get cloud settings as Pydantic model.
 
+        .. deprecated::
+            The ``cloud`` query was removed from the Unraid GraphQL API.
+            This method will be removed in a future release.
+
         Returns:
             Cloud model with settings information.
 
         """
+        warnings.warn(
+            "typed_get_cloud() is deprecated: the 'cloud' query was "
+            "removed from the Unraid GraphQL API and this method will "
+            "be removed in a future release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         from unraid_api.models import Cloud
 
         data = await self.get_cloud()
@@ -2687,10 +2806,21 @@ class UnraidClient:
     async def get_connect(self) -> dict[str, Any]:
         """Get Unraid Connect information.
 
+        .. deprecated::
+            The ``connect`` query was removed from the Unraid GraphQL API.
+            This method will be removed in a future release.
+
         Returns:
             Connect data dictionary.
 
         """
+        warnings.warn(
+            "get_connect() is deprecated: the 'connect' query was "
+            "removed from the Unraid GraphQL API and this method will "
+            "be removed in a future release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         query_str = """
             query {
                 connect {
@@ -2709,10 +2839,21 @@ class UnraidClient:
     async def typed_get_connect(self) -> Connect:
         """Get Unraid Connect as Pydantic model.
 
+        .. deprecated::
+            The ``connect`` query was removed from the Unraid GraphQL API.
+            This method will be removed in a future release.
+
         Returns:
             Connect model with connection information.
 
         """
+        warnings.warn(
+            "typed_get_connect() is deprecated: the 'connect' query "
+            "was removed from the Unraid GraphQL API and this method "
+            "will be removed in a future release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         from unraid_api.models import Connect
 
         data = await self.get_connect()
@@ -2721,10 +2862,21 @@ class UnraidClient:
     async def get_remote_access(self) -> dict[str, Any]:
         """Get remote access configuration.
 
+        .. deprecated::
+            The ``remoteAccess`` query was removed from the Unraid
+            GraphQL API. This method will be removed in a future release.
+
         Returns:
             Remote access data dictionary.
 
         """
+        warnings.warn(
+            "get_remote_access() is deprecated: the 'remoteAccess' "
+            "query was removed from the Unraid GraphQL API and this "
+            "method will be removed in a future release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         query_str = """
             query {
                 remoteAccess {
@@ -2740,10 +2892,21 @@ class UnraidClient:
     async def typed_get_remote_access(self) -> RemoteAccess:
         """Get remote access as Pydantic model.
 
+        .. deprecated::
+            The ``remoteAccess`` query was removed from the Unraid
+            GraphQL API. This method will be removed in a future release.
+
         Returns:
             RemoteAccess model with configuration.
 
         """
+        warnings.warn(
+            "typed_get_remote_access() is deprecated: the "
+            "'remoteAccess' query was removed from the Unraid GraphQL "
+            "API and this method will be removed in a future release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         from unraid_api.models import RemoteAccess
 
         data = await self.get_remote_access()
@@ -3334,6 +3497,45 @@ class UnraidClient:
         async for data in self.subscribe(subscription):
             mem_data = data.get("systemMetricsMemory", {})
             yield MemoryMetrics(**mem_data)
+
+    async def subscribe_temperature_metrics(
+        self,
+    ) -> AsyncGenerator[TemperatureMetrics, None]:
+        """Subscribe to live temperature metrics.
+
+        Yields TemperatureMetrics models with summary and sensor data
+        for all detected temperature sensors.
+
+        Yields:
+            TemperatureMetrics for each update event.
+
+        """
+        from unraid_api.models import TemperatureMetrics
+
+        subscription = """
+            subscription {
+                systemMetricsTemperature {
+                    id
+                    summary {
+                        average
+                        hottest { name current { value unit } }
+                        coolest { name current { value unit } }
+                        warningCount
+                        criticalCount
+                    }
+                    sensors {
+                        id name type location
+                        current { value unit status }
+                        min { value unit }
+                        max { value unit }
+                        warning critical
+                    }
+                }
+            }
+        """
+        async for data in self.subscribe(subscription):
+            temp_data = data.get("systemMetricsTemperature", {})
+            yield TemperatureMetrics(**temp_data)
 
     async def subscribe_ups_updates(
         self,

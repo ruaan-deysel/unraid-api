@@ -1683,6 +1683,13 @@ class TestParityCheckHelpers:
         pc = ParityCheck(status="IDLE")
         assert pc.is_running is False
 
+    def test_is_running_none_status(self) -> None:
+        """Test is_running with None status."""
+        from unraid_api.models import ParityCheck
+
+        pc = ParityCheck()
+        assert pc.is_running is False
+
     def test_has_problem_failed(self) -> None:
         """Test has_problem when failed."""
         from unraid_api.models import ParityCheck
@@ -1773,6 +1780,14 @@ class TestParityHistoryEntry:
         dt = datetime(2024, 1, 15, tzinfo=UTC)
         entry = ParityHistoryEntry(date=dt)
         assert entry.date == dt
+
+    def test_parse_parity_date_datetime_passthrough(self) -> None:
+        """Test _parse_parity_date with datetime input passes through."""
+        from unraid_api.models import _parse_parity_date
+
+        dt = datetime(2024, 1, 15, tzinfo=UTC)
+        result = _parse_parity_date(dt)
+        assert result is dt
 
     def test_float_epoch_date(self) -> None:
         """Test float epoch timestamp for date."""
@@ -1946,8 +1961,8 @@ class TestConstants:
         """Test that minimum version constants are defined."""
         from unraid_api.const import MIN_API_VERSION, MIN_UNRAID_VERSION
 
-        assert MIN_API_VERSION == "4.29.2"
-        assert MIN_UNRAID_VERSION == "7.2.3"
+        assert MIN_API_VERSION == "4.31.1"
+        assert MIN_UNRAID_VERSION == "7.2.4"
 
     def test_container_states_defined(self) -> None:
         """Test that container state constants are defined."""
@@ -2642,3 +2657,653 @@ class TestArraySubscriptionUpdate:
         update = ArraySubscriptionUpdate()
         assert update.state is None
         assert update.capacity is None
+
+
+# =============================================================================
+# Issue #38: Missing Memory Fields Tests
+# =============================================================================
+
+
+class TestMemoryUtilizationExtended:
+    """Tests for extended MemoryUtilization fields (active, buffcache, swapFree)."""
+
+    def test_memory_utilization_new_fields(self) -> None:
+        """Test MemoryUtilization includes active, buffcache, and swapFree."""
+        from unraid_api.models import MemoryUtilization
+
+        mem = MemoryUtilization(
+            total=33328332800,
+            used=31918235648,
+            free=1410097152,
+            available=27213021184,
+            active=6115311616,
+            buffcache=28791951360,
+            percentTotal=18.35,
+            swapTotal=0,
+            swapUsed=0,
+            swapFree=0,
+            percentSwapTotal=0.0,
+        )
+
+        assert mem.active == 6115311616
+        assert mem.buffcache == 28791951360
+        assert mem.swapFree == 0
+
+    def test_memory_utilization_backward_compat(self) -> None:
+        """Test MemoryUtilization works without new fields (backward compat)."""
+        from unraid_api.models import MemoryUtilization
+
+        mem = MemoryUtilization(
+            total=33328332800,
+            used=31918235648,
+            free=1410097152,
+            available=27213021184,
+            percentTotal=18.35,
+            swapTotal=0,
+            swapUsed=0,
+            percentSwapTotal=0.0,
+        )
+
+        assert mem.active is None
+        assert mem.buffcache is None
+        assert mem.swapFree is None
+
+    def test_system_metrics_new_memory_fields(self) -> None:
+        """Test SystemMetrics includes new memory fields from from_response."""
+        from unraid_api.models import SystemMetrics
+
+        response = {
+            "metrics": {
+                "cpu": {"percentTotal": 25.0},
+                "memory": {
+                    "total": 33328332800,
+                    "used": 31918235648,
+                    "free": 1410097152,
+                    "available": 27213021184,
+                    "active": 6115311616,
+                    "buffcache": 28791951360,
+                    "percentTotal": 18.35,
+                    "swapTotal": 8589934592,
+                    "swapUsed": 100000000,
+                    "swapFree": 8489934592,
+                    "percentSwapTotal": 1.2,
+                },
+            },
+            "info": {
+                "os": {"uptime": "2024-01-15T10:30:00Z"},
+                "cpu": {"packages": {"temp": [55.0], "totalPower": 65.5}},
+            },
+        }
+
+        metrics = SystemMetrics.from_response(response)
+
+        assert metrics.memory_active == 6115311616
+        assert metrics.memory_buffcache == 28791951360
+        assert metrics.swap_free == 8489934592
+
+    def test_system_metrics_missing_new_memory_fields(self) -> None:
+        """Test SystemMetrics from_response with missing new fields."""
+        from unraid_api.models import SystemMetrics
+
+        response = {
+            "metrics": {
+                "cpu": {"percentTotal": 10.0},
+                "memory": {
+                    "total": 33328332800,
+                    "used": 31918235648,
+                    "percentTotal": 18.35,
+                },
+            },
+        }
+
+        metrics = SystemMetrics.from_response(response)
+
+        assert metrics.memory_active is None
+        assert metrics.memory_buffcache is None
+        assert metrics.swap_free is None
+
+
+# =============================================================================
+# Issue #37: Temperature Models Tests
+# =============================================================================
+
+
+class TestTemperatureEnums:
+    """Tests for temperature enum types."""
+
+    def test_sensor_type_values(self) -> None:
+        """Test SensorType enum values."""
+        from unraid_api.models import SensorType
+
+        assert SensorType.CPU_PACKAGE == "CPU_PACKAGE"
+        assert SensorType.DISK == "DISK"
+        assert SensorType.NVME == "NVME"
+        assert SensorType.CUSTOM == "CUSTOM"
+
+    def test_temperature_unit_values(self) -> None:
+        """Test TemperatureUnit enum values."""
+        from unraid_api.models import TemperatureUnit
+
+        assert TemperatureUnit.CELSIUS == "CELSIUS"
+        assert TemperatureUnit.FAHRENHEIT == "FAHRENHEIT"
+
+    def test_temperature_status_values(self) -> None:
+        """Test TemperatureStatus enum values."""
+        from unraid_api.models import TemperatureStatus
+
+        assert TemperatureStatus.NORMAL == "NORMAL"
+        assert TemperatureStatus.WARNING == "WARNING"
+        assert TemperatureStatus.CRITICAL == "CRITICAL"
+        assert TemperatureStatus.UNKNOWN == "UNKNOWN"
+
+
+class TestTemperatureReading:
+    """Tests for TemperatureReading model."""
+
+    def test_reading_with_all_fields(self) -> None:
+        """Test TemperatureReading with all fields."""
+        from unraid_api.models import TemperatureReading
+
+        reading = TemperatureReading(value=45.0, unit="CELSIUS", status="NORMAL")
+
+        assert reading.value == 45.0
+        assert reading.unit == "CELSIUS"
+        assert reading.status == "NORMAL"
+
+    def test_reading_defaults(self) -> None:
+        """Test TemperatureReading defaults to None."""
+        from unraid_api.models import TemperatureReading
+
+        reading = TemperatureReading()
+
+        assert reading.value is None
+        assert reading.unit is None
+        assert reading.status is None
+
+
+class TestTemperatureSensor:
+    """Tests for TemperatureSensor model."""
+
+    def test_sensor_full_data(self) -> None:
+        """Test TemperatureSensor with complete data."""
+        from unraid_api.models import TemperatureReading, TemperatureSensor
+
+        sensor = TemperatureSensor(
+            id="disk:WKD07FR0",
+            name="ST8000VN004-2M2101",
+            type="DISK",
+            location=None,
+            current=TemperatureReading(value=30.0, unit="CELSIUS", status="NORMAL"),
+            min=TemperatureReading(value=28.0, unit="CELSIUS"),
+            max=TemperatureReading(value=35.0, unit="CELSIUS"),
+            warning=50,
+            critical=60,
+        )
+
+        assert sensor.id == "disk:WKD07FR0"
+        assert sensor.name == "ST8000VN004-2M2101"
+        assert sensor.type == "DISK"
+        assert sensor.temperature == 30.0
+        assert sensor.is_critical is False
+        assert sensor.is_warning is False
+        assert sensor.warning == 50
+        assert sensor.critical == 60
+
+    def test_sensor_critical_status(self) -> None:
+        """Test TemperatureSensor is_critical property."""
+        from unraid_api.models import TemperatureReading, TemperatureSensor
+
+        sensor = TemperatureSensor(
+            id="cpu:0",
+            current=TemperatureReading(value=95.0, unit="CELSIUS", status="CRITICAL"),
+        )
+
+        assert sensor.is_critical is True
+        assert sensor.is_warning is False
+
+    def test_sensor_warning_status(self) -> None:
+        """Test TemperatureSensor is_warning property."""
+        from unraid_api.models import TemperatureReading, TemperatureSensor
+
+        sensor = TemperatureSensor(
+            id="cpu:0",
+            current=TemperatureReading(value=75.0, unit="CELSIUS", status="WARNING"),
+        )
+
+        assert sensor.is_critical is False
+        assert sensor.is_warning is True
+
+    def test_sensor_no_current_reading(self) -> None:
+        """Test TemperatureSensor with no current reading."""
+        from unraid_api.models import TemperatureSensor
+
+        sensor = TemperatureSensor(id="test:1")
+
+        assert sensor.temperature is None
+        assert sensor.is_critical is False
+        assert sensor.is_warning is False
+
+
+class TestTemperatureMetrics:
+    """Tests for TemperatureMetrics model."""
+
+    def test_metrics_with_sensors(self) -> None:
+        """Test TemperatureMetrics with summary and sensors."""
+        from unraid_api.models import (
+            TemperatureMetrics,
+            TemperatureReading,
+            TemperatureSensor,
+            TemperatureSensorSummary,
+            TemperatureSummary,
+        )
+
+        metrics = TemperatureMetrics(
+            id="temp:1",
+            summary=TemperatureSummary(
+                average=35.0,
+                hottest=TemperatureSensorSummary(
+                    name="CPU",
+                    current=TemperatureReading(value=55.0, unit="CELSIUS"),
+                ),
+                coolest=TemperatureSensorSummary(
+                    name="SSD",
+                    current=TemperatureReading(value=25.0, unit="CELSIUS"),
+                ),
+                warningCount=0,
+                criticalCount=0,
+            ),
+            sensors=[
+                TemperatureSensor(
+                    id="cpu:0",
+                    name="CPU Package",
+                    type="CPU_PACKAGE",
+                    current=TemperatureReading(
+                        value=55.0, unit="CELSIUS", status="NORMAL"
+                    ),
+                ),
+                TemperatureSensor(
+                    id="disk:1",
+                    name="ST8000VN004",
+                    type="DISK",
+                    current=TemperatureReading(
+                        value=30.0, unit="CELSIUS", status="NORMAL"
+                    ),
+                ),
+                TemperatureSensor(
+                    id="nvme:1",
+                    name="Samsung 970 EVO",
+                    type="NVME",
+                    current=TemperatureReading(
+                        value=35.0, unit="CELSIUS", status="NORMAL"
+                    ),
+                ),
+            ],
+        )
+
+        assert metrics.id == "temp:1"
+        assert metrics.summary is not None
+        assert metrics.summary.average == 35.0
+        assert metrics.summary.warningCount == 0
+        assert len(metrics.sensors) == 3
+
+    def test_sensor_type_filtering(self) -> None:
+        """Test filtering sensors by type."""
+        from unraid_api.models import (
+            TemperatureMetrics,
+            TemperatureReading,
+            TemperatureSensor,
+        )
+
+        metrics = TemperatureMetrics(
+            sensors=[
+                TemperatureSensor(
+                    id="cpu:0",
+                    type="CPU_PACKAGE",
+                    current=TemperatureReading(value=55.0),
+                ),
+                TemperatureSensor(
+                    id="cpu:1",
+                    type="CPU_CORE",
+                    current=TemperatureReading(value=50.0),
+                ),
+                TemperatureSensor(
+                    id="disk:0",
+                    type="DISK",
+                    current=TemperatureReading(value=30.0),
+                ),
+                TemperatureSensor(
+                    id="nvme:0",
+                    type="NVME",
+                    current=TemperatureReading(value=35.0),
+                ),
+                TemperatureSensor(
+                    id="custom:0",
+                    type="CUSTOM",
+                    current=TemperatureReading(value=1.0),
+                ),
+            ],
+        )
+
+        assert len(metrics.disk_sensors) == 1
+        assert len(metrics.nvme_sensors) == 1
+        assert len(metrics.cpu_sensors) == 2
+        assert len(metrics.get_sensors_by_type("CUSTOM")) == 1
+
+    def test_metrics_defaults(self) -> None:
+        """Test TemperatureMetrics with default values."""
+        from unraid_api.models import TemperatureMetrics
+
+        metrics = TemperatureMetrics()
+
+        assert metrics.id is None
+        assert metrics.summary is None
+        assert metrics.sensors == []
+        assert metrics.disk_sensors == []
+        assert metrics.nvme_sensors == []
+        assert metrics.cpu_sensors == []
+
+    def test_temperature_in_system_metrics(self) -> None:
+        """Test temperature data is included in SystemMetrics.from_response."""
+        from unraid_api.models import SystemMetrics
+
+        response = {
+            "metrics": {
+                "cpu": {"percentTotal": 25.0},
+                "memory": {"percentTotal": 50.0},
+                "temperature": {
+                    "id": "temp:1",
+                    "summary": {
+                        "average": 40.0,
+                        "warningCount": 0,
+                        "criticalCount": 0,
+                    },
+                    "sensors": [
+                        {
+                            "id": "disk:1",
+                            "name": "ST8000VN004",
+                            "type": "DISK",
+                            "current": {
+                                "value": 30.0,
+                                "unit": "CELSIUS",
+                                "status": "NORMAL",
+                            },
+                            "warning": 50,
+                            "critical": 60,
+                        }
+                    ],
+                },
+            },
+            "info": {
+                "cpu": {"packages": {"temp": [55.0], "totalPower": 65.5}},
+            },
+        }
+
+        metrics = SystemMetrics.from_response(response)
+
+        assert metrics.temperature is not None
+        assert metrics.temperature.id == "temp:1"
+        assert len(metrics.temperature.sensors) == 1
+        assert metrics.temperature.sensors[0].name == "ST8000VN004"
+        assert metrics.temperature.sensors[0].temperature == 30.0
+        assert metrics.temperature.summary is not None
+        assert metrics.temperature.summary.average == 40.0
+
+    def test_temperature_missing_from_response(self) -> None:
+        """Test SystemMetrics.from_response with no temperature data."""
+        from unraid_api.models import SystemMetrics
+
+        response = {
+            "metrics": {
+                "cpu": {"percentTotal": 25.0},
+                "memory": {"percentTotal": 50.0},
+            },
+        }
+
+        metrics = SystemMetrics.from_response(response)
+
+        assert metrics.temperature is None
+
+    def test_temperature_from_live_response(self) -> None:
+        """Test temperature models parse a realistic API response."""
+        from unraid_api.models import TemperatureMetrics
+
+        # Realistic data based on actual Unraid API response
+        data = {
+            "id": "abc123:temperature-metrics",
+            "summary": {
+                "average": 35.5,
+                "hottest": {
+                    "name": "CPU Package",
+                    "current": {"value": 55.0, "unit": "CELSIUS"},
+                },
+                "coolest": {
+                    "name": "NVMe SSD",
+                    "current": {"value": 29.0, "unit": "CELSIUS"},
+                },
+                "warningCount": 0,
+                "criticalCount": 0,
+            },
+            "sensors": [
+                {
+                    "id": "disk:WKD07FR0",
+                    "name": "ST8000VN004-2M2101",
+                    "type": "DISK",
+                    "location": None,
+                    "current": {
+                        "value": 30.0,
+                        "unit": "CELSIUS",
+                        "status": "NORMAL",
+                    },
+                    "min": {"value": 30.0, "unit": "CELSIUS"},
+                    "max": {"value": 30.0, "unit": "CELSIUS"},
+                    "warning": 50,
+                    "critical": 60,
+                },
+                {
+                    "id": "disk:A240910N4M051200021",
+                    "name": "SPCC M.2 PCIe SSD",
+                    "type": "NVME",
+                    "location": None,
+                    "current": {
+                        "value": 29.0,
+                        "unit": "CELSIUS",
+                        "status": "NORMAL",
+                    },
+                    "min": {"value": 29.0, "unit": "CELSIUS"},
+                    "max": {"value": 29.0, "unit": "CELSIUS"},
+                    "warning": 50,
+                    "critical": 60,
+                },
+            ],
+        }
+
+        metrics = TemperatureMetrics(**data)
+
+        assert len(metrics.sensors) == 2
+        assert metrics.sensors[0].name == "ST8000VN004-2M2101"
+        assert metrics.sensors[0].type == "DISK"
+        assert metrics.sensors[0].temperature == 30.0
+        assert metrics.sensors[1].type == "NVME"
+        assert len(metrics.disk_sensors) == 1
+        assert len(metrics.nvme_sensors) == 1
+        assert metrics.summary is not None
+        assert metrics.summary.hottest is not None
+        assert metrics.summary.hottest.name == "CPU Package"
+
+
+# =============================================================================
+# Audit Fix Tests - Schema alignment verification
+# =============================================================================
+
+
+class TestVmDomainSchemaAlignment:
+    """Verify VmDomain only has fields that exist in the GraphQL schema."""
+
+    def test_only_schema_fields(self) -> None:
+        """VmDomain should only have id, name, state (per live schema)."""
+        from unraid_api.models import VmDomain
+
+        vm = VmDomain(id="vm:1", name="TestVM", state="running")
+        assert vm.id == "vm:1"
+        assert vm.name == "TestVM"
+        assert vm.state == "running"
+        # These fields were removed as they don't exist in the schema
+        assert not hasattr(VmDomain.model_fields, "memory")
+        assert "memory" not in VmDomain.model_fields
+        assert "vcpu" not in VmDomain.model_fields
+        assert "autostart" not in VmDomain.model_fields
+        assert "cpuMode" not in VmDomain.model_fields
+        assert "iconUrl" not in VmDomain.model_fields
+        assert "primaryGpu" not in VmDomain.model_fields
+
+    def test_ignores_extra_fields(self) -> None:
+        """VmDomain should silently ignore unknown fields."""
+        from unraid_api.models import VmDomain
+
+        vm = VmDomain(id="vm:1", name="Test", memory=1024, vcpu=2)
+        assert vm.id == "vm:1"
+        assert vm.name == "Test"
+
+
+class TestShareComment:
+    """Verify Share model includes comment field."""
+
+    def test_comment_field(self) -> None:
+        """Share should have comment field."""
+        from unraid_api.models import Share
+
+        share = Share(id="share:1", name="appdata", comment="Application data")
+        assert share.comment == "Application data"
+
+    def test_comment_default_none(self) -> None:
+        """Share comment should default to None."""
+        from unraid_api.models import Share
+
+        share = Share(id="share:1", name="appdata")
+        assert share.comment is None
+
+
+class TestNotificationAllFields:
+    """Verify Notification model has all schema fields."""
+
+    def test_all_fields(self) -> None:
+        """Notification should have link, type, and formattedTimestamp."""
+        from unraid_api.models import Notification
+
+        n = Notification(
+            id="n:1",
+            title="Test",
+            subject="Subject",
+            description="Desc",
+            importance="alert",
+            link="https://example.com",
+            type="UNREAD",
+            timestamp="2024-01-01T00:00:00Z",
+            formattedTimestamp="Jan 1, 2024",
+        )
+        assert n.link == "https://example.com"
+        assert n.type == "UNREAD"
+        assert n.formattedTimestamp == "Jan 1, 2024"
+
+
+class TestCpuCoreAllFields:
+    """Verify CpuCore model has all per-CPU metric fields."""
+
+    def test_all_fields(self) -> None:
+        """CpuCore should have all 8 per-CPU fields."""
+        from unraid_api.models import CpuCore
+
+        core = CpuCore(
+            percentTotal=50.0,
+            percentUser=30.0,
+            percentSystem=15.0,
+            percentIdle=50.0,
+            percentNice=0.5,
+            percentIrq=0.1,
+            percentGuest=0.0,
+            percentSteal=0.0,
+        )
+        assert core.percentTotal == 50.0
+        assert core.percentUser == 30.0
+        assert core.percentSystem == 15.0
+        assert core.percentIdle == 50.0
+        assert core.percentNice == 0.5
+        assert core.percentIrq == 0.1
+        assert core.percentGuest == 0.0
+        assert core.percentSteal == 0.0
+
+    def test_defaults_none(self) -> None:
+        """All CpuCore fields should default to None."""
+        from unraid_api.models import CpuCore
+
+        core = CpuCore()
+        assert core.percentTotal is None
+        assert core.percentUser is None
+        assert core.percentNice is None
+        assert core.percentIrq is None
+        assert core.percentGuest is None
+        assert core.percentSteal is None
+
+
+class TestPhysicalDiskExtendedFields:
+    """Verify PhysicalDisk model has all schema fields."""
+
+    def test_extended_fields(self) -> None:
+        """PhysicalDisk should have serialNum, firmwareRevision, partitions."""
+        from unraid_api.models import DiskPartition, PhysicalDisk
+
+        disk = PhysicalDisk(
+            id="disk:1",
+            device="sda",
+            name="WDC WD40EFAX",
+            vendor="Western Digital",
+            size=4000787030016,
+            serialNum="WD-WX11A12B3456",
+            firmwareRevision="83.00A83",
+            partitions=[
+                DiskPartition(name="sda1", fsType="xfs", size=4000785088512),
+            ],
+        )
+        assert disk.serialNum == "WD-WX11A12B3456"
+        assert disk.firmwareRevision == "83.00A83"
+        assert disk.partitions is not None
+        assert len(disk.partitions) == 1
+        assert disk.partitions[0].name == "sda1"
+        assert disk.partitions[0].fsType == "xfs"
+
+    def test_extended_fields_default_none(self) -> None:
+        """Extended fields should default to None."""
+        from unraid_api.models import PhysicalDisk
+
+        disk = PhysicalDisk(id="disk:1")
+        assert disk.serialNum is None
+        assert disk.firmwareRevision is None
+        assert disk.partitions is None
+
+
+class TestExportedModels:
+    """Verify newly exported models are accessible."""
+
+    def test_disk_partition_exported(self) -> None:
+        """DiskPartition should be importable from unraid_api."""
+        from unraid_api import DiskPartition
+
+        p = DiskPartition(name="sda1", fsType="xfs", size=1000)
+        assert p.name == "sda1"
+
+    def test_memory_utilization_exported(self) -> None:
+        """MemoryUtilization should be importable from unraid_api."""
+        from unraid_api import MemoryUtilization
+
+        m = MemoryUtilization(
+            total=16000000000, active=6000000000, buffcache=8000000000
+        )
+        assert m.total == 16000000000
+        assert m.active == 6000000000
+
+    def test_notification_overview_counts_exported(self) -> None:
+        """NotificationOverviewCounts should be importable from unraid_api."""
+        from unraid_api import NotificationOverviewCounts
+
+        c = NotificationOverviewCounts(info=5, warning=2, alert=1, total=8)
+        assert c.total == 8

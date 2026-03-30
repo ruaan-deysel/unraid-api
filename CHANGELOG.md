@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-03-31
+
+### Security
+
+- **API key no longer sent during SSL discovery** — The HTTP redirect probe in `_discover_redirect_url()` no longer includes authentication headers, preventing API key exposure over plaintext HTTP connections during SSL auto-discovery
+
+### Deprecated
+
+- **cloud/connect/remoteAccess methods** — `get_cloud()`, `typed_get_cloud()`, `get_connect()`, `typed_get_connect()`, `get_remote_access()`, and `typed_get_remote_access()` now emit `DeprecationWarning`. These query roots were removed from the live Unraid GraphQL API (v4.31.1) and may be re-added in a future release. Models (`Cloud`, `Connect`, `RemoteAccess`) are retained for backward compatibility.
+
+### Changed
+
+- **Schema alignment audit** — Comprehensive cross-reference of all models, queries, and exports against live Unraid server GraphQL schema
+  - **VmDomain**: Removed 6 speculative fields (`memory`, `vcpu`, `autostart`, `cpuMode`, `iconUrl`, `primaryGpu`) that do not exist in the GraphQL schema
+  - **CpuCore**: Added all per-CPU metric fields (`percentUser`, `percentSystem`, `percentIdle`, `percentNice`, `percentIrq`, `percentGuest`, `percentSteal`) — previously only had `percentTotal`
+  - **DisplaySettings**: `str | bool | None` union types retained — API may return string representations for boolean fields
+- **Granular timeout configuration** — Replaced single total timeout with separate connect (10s cap) and read timeouts via `aiohttp.ClientTimeout`, preventing slow connections from consuming the entire timeout budget
+- **Connection pool limits** — Added `limit=10` and `limit_per_host=5` to `TCPConnector` to prevent connection exhaustion under concurrent usage
+- **WebSocket size and timeout limits** — Added `max_msg_size=16MB` to prevent OOM on malformed responses and `receive_timeout` to detect stalled subscriptions
+- **Graceful session shutdown** — Added `asyncio.sleep(0)` after `session.close()` to allow aiohttp transport cleanup per upstream best practices
+- **Safe `__repr__`** — `UnraidClient` now has a `__repr__` that shows host/port/ssl status without exposing the API key
+- **Python 3.14 compatibility** — `enable_cleanup_closed` is only passed to `TCPConnector` on Python < 3.14 where it isn't a no-op
+
+### Added
+
+- **Share.comment** field and query — `typed_get_shares()` and `Share` model now include the share `comment` field from the schema
+- **Notification query fields** — `get_notifications()` now fetches `link`, `type`, and `formattedTimestamp` (model already had these fields, query was missing them)
+- **PhysicalDisk extended fields** — Added `serialNum`, `firmwareRevision`, and `partitions` (list of `DiskPartition`) to `PhysicalDisk` model and `get_physical_disks()` query
+- **get_metrics() extended fields** — Now includes `active` and `buffcache` in memory query, and `percentNice`, `percentIrq`, `percentGuest`, `percentSteal` in per-CPU query
+- **New exports** — `DiskPartition`, `MemoryUtilization`, and `NotificationOverviewCounts` are now exported from `unraid_api` for consumer type access
+- **Temperature monitoring** ([#37](https://github.com/ruaan-deysel/unraid-api/issues/37)) — Full temperature sensor support via `get_temperature_metrics()` query and `subscribe_temperature_metrics()` subscription
+  - New models: `TemperatureMetrics`, `TemperatureSensor`, `TemperatureReading`, `TemperatureSummary`, `TemperatureSensorSummary`
+  - New enums: `SensorType` (CPU_PACKAGE, CPU_CORE, DISK, NVME, CUSTOM), `TemperatureUnit` (CELSIUS, FAHRENHEIT), `TemperatureStatus` (NORMAL, WARNING, CRITICAL, UNKNOWN)
+  - Helper properties: `TemperatureSensor.temperature`, `is_critical`, `is_warning`; `TemperatureMetrics.disk_sensors`, `nvme_sensors`, `cpu_sensors`, `get_sensors_by_type()`
+  - Temperature data also included in `SystemMetrics.from_response()` via `temperature` field
+- **Missing memory fields** ([#38](https://github.com/ruaan-deysel/unraid-api/issues/38)) — Added `active`, `buffcache`, and `swapFree` to `MemoryUtilization` model and `memory_active`, `memory_buffcache`, `swap_free` to `SystemMetrics`
+  - `get_system_metrics()` query now fetches these additional memory fields
+
 ## [1.7.1] - 2026-03-21
 
 ### Fixed

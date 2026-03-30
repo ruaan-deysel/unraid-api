@@ -617,3 +617,57 @@ class TestTypedSubscriptions:
         assert results[0].state == "STARTED"
         assert results[0].capacity is not None
         assert results[0].capacity.kilobytes.total == 1000000
+
+    async def test_subscribe_temperature_metrics(self, ws_client: UnraidClient) -> None:
+        """Test subscribe_temperature_metrics yields TemperatureMetrics."""
+        from unraid_api.models import TemperatureMetrics
+
+        ack = _ws_text_msg({"type": "connection_ack"})
+        next_msg = _ws_text_msg(
+            {
+                "id": "test",
+                "type": "next",
+                "payload": {
+                    "data": {
+                        "systemMetricsTemperature": {
+                            "id": "temp:1",
+                            "summary": {
+                                "average": 35.0,
+                                "warningCount": 0,
+                                "criticalCount": 0,
+                            },
+                            "sensors": [
+                                {
+                                    "id": "disk:1",
+                                    "name": "ST8000VN004",
+                                    "type": "DISK",
+                                    "current": {
+                                        "value": 30.0,
+                                        "unit": "CELSIUS",
+                                        "status": "NORMAL",
+                                    },
+                                    "warning": 50,
+                                    "critical": 60,
+                                }
+                            ],
+                        }
+                    }
+                },
+            }
+        )
+        complete = _ws_text_msg({"id": "test", "type": "complete"})
+
+        ws = MockWebSocket([ack, next_msg, complete])
+        ws_client._session.ws_connect = AsyncMock(return_value=ws)  # type: ignore[union-attr]
+
+        results: list[TemperatureMetrics] = []
+        async for metrics in ws_client.subscribe_temperature_metrics():
+            results.append(metrics)
+
+        assert len(results) == 1
+        assert isinstance(results[0], TemperatureMetrics)
+        assert results[0].id == "temp:1"
+        assert results[0].summary is not None
+        assert results[0].summary.average == 35.0
+        assert len(results[0].sensors) == 1
+        assert results[0].sensors[0].temperature == 30.0

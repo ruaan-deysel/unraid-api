@@ -1,32 +1,26 @@
 #!/usr/bin/env python3
-"""Unraid API ↔ GraphQL Schema Cross-Check Validator.
+"""Unraid API ↔ GraphQL Schema Validator.
 
 This script validates that every GraphQL query, mutation, and subscription
 in the unraid-api client library is compatible with the actual schema
-exposed by a live Unraid server AND the official schema from the Unraid
-API GitHub repository. It catches field renames, removed fields, changed
-nesting (e.g., the capacity { kilobytes { ... } } issue from #196), and
-type mismatches BEFORE they hit production.
+exposed by a live Unraid server. It catches field renames, removed fields,
+changed nesting (e.g., the capacity { kilobytes { ... } } issue from #196),
+and type mismatches BEFORE they hit production.
 
-Three-way cross-check:
-  Official GitHub Schema ↔ Live Server ↔ Our Client
+The live Unraid server schema is the source of truth.
 
 How it works:
-  1. Fetches the official GraphQL SDL schema from github.com/unraid/api
-  2. Introspects the live Unraid GraphQL schema to get all types and fields
-  3. Extracts all GraphQL operation strings from the client source code
-  4. Validates every requested field exists on BOTH schemas
-  5. Compares official schema vs live server to detect drift
-  6. Runs every client method against the live server
-  7. Validates response data matches Pydantic models
-  8. Reports any schema mismatches, missing fields, or validation errors
+  1. Introspects the live Unraid GraphQL schema to get all types and fields
+  2. Extracts all GraphQL operation strings from the client source code
+  3. Validates every requested field exists in the live schema
+  4. Runs every client method against the live server
+  5. Validates response data matches Pydantic models
+  6. Reports any schema mismatches, missing fields, or validation errors
 
 Usage:
   python scripts/validate-schema.py                 # Run all validations
   python scripts/validate-schema.py --schema-only   # Only introspect + validate fields
   python scripts/validate-schema.py --live-only     # Only run live method tests
-  python scripts/validate-schema.py --github-only   # Only fetch + validate against GitHub schema
-  python scripts/validate-schema.py --no-github     # Skip GitHub schema check
   python scripts/validate-schema.py --dump-schema   # Dump introspected schema to JSON
 
 Reads credentials from scripts/.env or UNRAID_HOST/UNRAID_API_KEY env vars.
@@ -42,7 +36,6 @@ import os
 import re
 import sys
 import textwrap
-import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -289,226 +282,7 @@ async def introspect_schema(client: UnraidClient) -> dict[str, SchemaType]:
     return types
 
 
-# =============================================================================
-# Official GitHub Schema — Fetch & Parse SDL
-# =============================================================================
 
-GITHUB_SCHEMA_URL = (
-    "https://raw.githubusercontent.com/unraid/api/main"
-    "/api/generated-schema.graphql"
-)
-
-
-def fetch_official_schema_sdl(
-    url: str = GITHUB_SCHEMA_URL,
-    branch: str | None = None,
-) -> str:
-    """Fetch the generated-schema.graphql from the official Unraid API repo."""
-    if branch:
-        url = url.replace("/main/", f"/{branch}/")
-    req = urllib.request.Request(url, headers={"User-Agent": "unraid-api-validator"})
-    with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
-        return resp.read().decode("utf-8")
-
-
-def parse_sdl_to_schema_types(sdl_text: str) -> dict[str, SchemaType]:
-    """Parse a GraphQL SDL string into our SchemaType format.
-
-    Uses graphql-core to build a proper schema, then converts to the same
-    data structures used by live introspection so all comparison logic
-    can be reused.
-    """
-    from graphql import build_schema as gql_build_schema
-    from graphql import (
-        GraphQLEnumType,
-        GraphQLField,
-        GraphQLInputObjectType,
-        GraphQLList,
-        GraphQLNonNull,
-        GraphQLObjectType,
-        GraphQLUnionType,
-    )
-
-    # Build schema — use assume_valid to tolerate custom scalars
-    schema = gql_build_schema(sdl_text, assume_valid=True)
-    types: dict[str, SchemaType] = {}
-
-    def _unwrap_gql_type(
-        gql_type: Any,
-    ) -> tuple[str | None, str, bool, bool]:
-        """Unwrap a graphql-core type to (name, kind, is_list, is_non_null)."""
-        is_non_null = False
-        is_list = False
-        current = gql_type
-
-        while current is not None:
-            if isinstance(current, GraphQLNonNull):
-                is_non_null = True
-                current = current.of_type
-            elif isinstance(current, GraphQLList):
-                is_list = True
-                current = current.of_type
-            else:
-                name = getattr(current, "name", None)
-                if isinstance(current, GraphQLObjectType):
-                    kind = "OBJECT"
-                elif isinstance(current, GraphQLEnumType):
-                    kind = "ENUM"
-                elif isinstance(current, GraphQLInputObjectType):
-                    kind = "INPUT_OBJECT"
-                elif isinstance(current, GraphQLUnionType):
-                    kind = "UNION"
-                else:
-                    kind = "SCALAR"
-                return name, kind, is_list, is_non_null
-
-        return None, "UNKNOWN", is_list, is_non_null
-
-    for type_name, gql_type in schema.type_map.items():
-        if type_name.startswith("__"):
-            continue
-
-        if isinstance(gql_type, GraphQLObjectType):
-            kind = "OBJECT"
-        elif isinstance(gql_type, GraphQLEnumType):
-            kind = "ENUM"
-        elif isinstance(gql_type, GraphQLInputObjectType):
-            kind = "INPUT_OBJECT"
-        elif isinstance(gql_type, GraphQLUnionType):
-            kind = "UNION"
-        else:
-            kind = "SCALAR"
-
-        st = SchemaType(name=type_name, kind=kind)
-
-        # Extract fields
-        if isinstance(
-            gql_type, (GraphQLObjectType, GraphQLInputObjectType)
-        ):
-            field_map: dict[str, GraphQLField] = gql_type.fields
-            for fname, fval in field_map.items():
-                f_type_name, f_kind, f_is_list, f_is_non_null = _unwrap_gql_type(
-                    fval.type
-                )
-                args_list: list[str] = []
-                if hasattr(fval, "args") and fval.args:
-                    args_list = list(fval.args.keys())
-                st.fields[fname] = SchemaField(
-                    name=fname,
-                    type_name=f_type_name,
-                    type_kind=f_kind,
-                    is_list=f_is_list,
-                    is_non_null=f_is_non_null,
-                    args=args_list,
-                )
-
-        # Extract enum values
-        if isinstance(gql_type, GraphQLEnumType):
-            st.enum_values = list(gql_type.values.keys())
-
-        types[type_name] = st
-
-    return types
-
-
-# =============================================================================
-# Official ↔ Live Schema Comparison
-# =============================================================================
-
-
-@dataclass
-class SchemaDiffIssue:
-    """A difference between the official and live schemas."""
-
-    severity: str  # ERROR, WARNING, INFO
-    category: str  # type_missing, field_missing, field_type_mismatch, field_extra
-    message: str
-
-
-def compare_official_vs_live(
-    official: dict[str, SchemaType],
-    live: dict[str, SchemaType],
-) -> list[SchemaDiffIssue]:
-    """Compare the official GitHub schema against the live server schema.
-
-    Finds types/fields in official but not live (server behind), and
-    types/fields in live but not official (server ahead / custom).
-    Only compares OBJECT and INPUT_OBJECT types we care about.
-    """
-    issues: list[SchemaDiffIssue] = []
-
-    # Skip internal/scalar types for comparison
-    skip_kinds = {"SCALAR"}
-
-    # Types in official but not live
-    for type_name, otype in official.items():
-        if otype.kind in skip_kinds:
-            continue
-        if type_name not in live:
-            issues.append(
-                SchemaDiffIssue(
-                    severity="WARNING",
-                    category="type_missing_on_live",
-                    message=(
-                        f"Type '{type_name}' ({otype.kind}) exists in official"
-                        f" schema but not on live server"
-                    ),
-                )
-            )
-            continue
-
-        ltype = live[type_name]
-
-        # Compare fields
-        if otype.kind in ("OBJECT", "INPUT_OBJECT"):
-            for fname in otype.fields:
-                if fname not in ltype.fields:
-                    issues.append(
-                        SchemaDiffIssue(
-                            severity="WARNING",
-                            category="field_missing_on_live",
-                            message=(
-                                f"Field '{type_name}.{fname}' exists in"
-                                f" official schema but not on live server"
-                            ),
-                        )
-                    )
-
-    # Types in live but not official
-    for type_name, ltype in live.items():
-        if ltype.kind in skip_kinds:
-            continue
-        if type_name not in official:
-            issues.append(
-                SchemaDiffIssue(
-                    severity="INFO",
-                    category="type_extra_on_live",
-                    message=(
-                        f"Type '{type_name}' ({ltype.kind}) exists on live"
-                        f" server but not in official schema"
-                    ),
-                )
-            )
-            continue
-
-        otype = official[type_name]
-
-        # Fields in live but not official
-        if ltype.kind in ("OBJECT", "INPUT_OBJECT"):
-            for fname in ltype.fields:
-                if fname not in otype.fields:
-                    issues.append(
-                        SchemaDiffIssue(
-                            severity="INFO",
-                            category="field_extra_on_live",
-                            message=(
-                                f"Field '{type_name}.{fname}' exists on live"
-                                f" server but not in official schema"
-                            ),
-                        )
-                    )
-
-    return issues
 
 
 # =============================================================================
@@ -1151,62 +925,9 @@ def print_validation_report(
     query_issues: list[ValidationIssue],
     model_issues: list[ValidationIssue],
     live_results: list[LiveTestResult] | None,
-    github_diff: list[SchemaDiffIssue] | None = None,
-    github_query_issues: list[ValidationIssue] | None = None,
 ) -> int:
     """Print the full validation report. Returns exit code."""
     exit_code = 0
-
-    # Official GitHub schema comparison
-    if github_diff is not None:
-        print("\n" + "=" * 70)
-        print("OFFICIAL GITHUB SCHEMA ↔ LIVE SERVER COMPARISON")
-        print("=" * 70)
-
-        diff_errors = [d for d in github_diff if d.severity == "ERROR"]
-        diff_warnings = [d for d in github_diff if d.severity == "WARNING"]
-        diff_info = [d for d in github_diff if d.severity == "INFO"]
-
-        if not diff_errors and not diff_warnings and not diff_info:
-            print("\n  ✅ Official and live schemas are in sync!")
-        else:
-            if diff_errors:
-                exit_code = 1
-                print(f"\n  ❌ {len(diff_errors)} ERROR(s):")
-                for d in diff_errors:
-                    print(f"    • {d.message}")
-            if diff_warnings:
-                print(f"\n  ⚠️  {len(diff_warnings)} WARNING(s) — official↔live drift:")
-                for d in diff_warnings:
-                    print(f"    • {d.message}")
-            if diff_info:
-                print(f"\n  ℹ️  {len(diff_info)} info note(s):")
-                for d in diff_info:
-                    print(f"    • {d.message}")
-
-    # Client queries vs official schema
-    if github_query_issues is not None:
-        print("\n" + "=" * 70)
-        print("CLIENT QUERIES ↔ OFFICIAL GITHUB SCHEMA VALIDATION")
-        print("=" * 70)
-
-        gh_errors = [i for i in github_query_issues if i.severity == "ERROR"]
-        gh_warnings = [i for i in github_query_issues if i.severity == "WARNING"]
-
-        if not gh_errors and not gh_warnings:
-            print("\n  ✅ All client queries are valid against the official schema!")
-        else:
-            if gh_errors:
-                exit_code = 1
-                print(f"\n  ❌ {len(gh_errors)} ERROR(s) — fields NOT in official schema:")
-                for issue in gh_errors:
-                    print(f"\n    [{issue.method_name}] {issue.field_path}")
-                    print(f"      {issue.message}")
-            if gh_warnings:
-                print(f"\n  ⚠️  {len(gh_warnings)} WARNING(s):")
-                for issue in gh_warnings:
-                    print(f"\n    [{issue.method_name}] {issue.field_path}")
-                    print(f"      {issue.message}")
 
     # Query validation (live server)
     print("\n" + "=" * 70)
@@ -1303,27 +1024,22 @@ def print_validation_report(
 
 async def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Unraid API ↔ GraphQL Schema Cross-Check Validator",
+        description="Unraid API ↔ GraphQL Schema Validator",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""\
             This tool validates that the unraid-api client's GraphQL queries,
-            mutations, and subscriptions match BOTH the actual Unraid server
-            schema AND the official schema from github.com/unraid/api.
+            mutations, and subscriptions match the actual Unraid server schema.
 
-            Three-way cross-check:
-              Official GitHub Schema ↔ Live Server ↔ Our Client
+            The live Unraid server schema is the source of truth.
 
             It catches issues like ha-unraid#196 where field renames or nesting
             changes break the client at runtime.
 
             examples:
-              %(prog)s                  # Full validation (GitHub + live + schema)
+              %(prog)s                  # Full validation (schema + live)
               %(prog)s --schema-only    # Validate queries against schema only
               %(prog)s --live-only      # Run live method tests only
-              %(prog)s --github-only    # Only check against GitHub official schema
-              %(prog)s --no-github      # Skip GitHub schema check
               %(prog)s --dump-schema    # Dump full introspected schema to JSON
-              %(prog)s --github-branch dev  # Use a specific branch
         """),
     )
     parser.add_argument(
@@ -1335,22 +1051,6 @@ async def main() -> int:
         "--live-only",
         action="store_true",
         help="Only run live method execution tests",
-    )
-    parser.add_argument(
-        "--github-only",
-        action="store_true",
-        help="Only fetch and validate against the official GitHub schema (no live server needed)",
-    )
-    parser.add_argument(
-        "--no-github",
-        action="store_true",
-        help="Skip the official GitHub schema cross-check",
-    )
-    parser.add_argument(
-        "--github-branch",
-        type=str,
-        default=None,
-        help="Branch of unraid/api to fetch schema from (default: main)",
     )
     parser.add_argument(
         "--dump-schema",
@@ -1367,62 +1067,7 @@ async def main() -> int:
         print(f"ERROR: Client source not found at {client_path}")
         return 1
 
-    # === Phase 0: Fetch official GitHub schema (unless disabled) ===
-    official_types: dict[str, SchemaType] | None = None
-    github_diff: list[SchemaDiffIssue] | None = None
-    github_query_issues: list[ValidationIssue] | None = None
-
-    if not args.no_github:
-        print("\n→ Fetching official schema from github.com/unraid/api...")
-        try:
-            sdl = fetch_official_schema_sdl(branch=args.github_branch)
-            official_types = parse_sdl_to_schema_types(sdl)
-            branch_label = args.github_branch or "main"
-            print(f"  Parsed {len(official_types)} types from official schema ({branch_label})")
-
-            # Count by kind for summary
-            kinds: dict[str, int] = {}
-            for t in official_types.values():
-                kinds[t.kind] = kinds.get(t.kind, 0) + 1
-            for kind, count in sorted(kinds.items()):
-                print(f"    {kind}: {count}")
-        except Exception as e:
-            print(f"  WARNING: Could not fetch official schema: {e}")
-            print("  Continuing without official schema check...")
-            official_types = None
-
-    # If --github-only, validate client queries against official schema only
-    if args.github_only:
-        if official_types is None:
-            print("ERROR: Could not fetch official schema for --github-only mode")
-            return 1
-
-        print("\n→ Extracting GraphQL operations from client source...")
-        queries = extract_queries_from_source(str(client_path))
-        seen: set[str] = set()
-        unique_queries: list[ExtractedQuery] = []
-        for q in queries:
-            key = q.query_string.strip()
-            if key not in seen:
-                seen.add(key)
-                unique_queries.append(q)
-        print(f"  Found {len(unique_queries)} unique operations")
-
-        print("\n→ Validating client queries against official GitHub schema...")
-        github_query_issues = validate_queries(unique_queries, official_types)
-
-        print("\n→ Comparing Pydantic models to official schema types...")
-        model_issues = compare_models_to_schema(official_types)
-
-        return print_validation_report(
-            query_issues=[],
-            model_issues=model_issues,
-            live_results=None,
-            github_diff=None,
-            github_query_issues=github_query_issues,
-        )
-
-    # === Phases requiring live server ===
+    # === Connect to live server ===
     host, api_key = load_env()
     print(f"\nHost: {_sanitize_host(host)}")
     print(f"API Key: {'*' * 8}...{'*' * 4} (loaded)")
@@ -1463,20 +1108,12 @@ async def main() -> int:
 
         print_schema_summary(schema_types)
 
-        # Step 2: Compare official schema vs live server
-        if official_types is not None:
-            print("\n→ Comparing official GitHub schema ↔ live server...")
-            github_diff = compare_official_vs_live(official_types, schema_types)
-            warnings = sum(1 for d in github_diff if d.severity == "WARNING")
-            info = sum(1 for d in github_diff if d.severity == "INFO")
-            print(f"  Found {warnings} warnings, {info} info notes")
-
         query_issues: list[ValidationIssue] = []
         model_issues: list[ValidationIssue] = []
         live_results: list[LiveTestResult] | None = None
 
         if not args.live_only:
-            # Step 3: Extract and validate queries
+            # Step 2: Extract and validate queries
             print("\n→ Extracting GraphQL operations from client source...")
             queries = extract_queries_from_source(str(client_path))
             print(f"  Found {len(queries)} operations")
@@ -1494,22 +1131,15 @@ async def main() -> int:
             print("\n→ Validating query fields against live schema...")
             query_issues = validate_queries(unique_queries, schema_types)
 
-            # Also validate against official schema
-            if official_types is not None:
-                print("\n→ Validating query fields against official GitHub schema...")
-                github_query_issues = validate_queries(unique_queries, official_types)
-
             print("\n→ Comparing Pydantic models to schema types...")
             model_issues = compare_models_to_schema(schema_types)
 
         if not args.schema_only:
-            # Step 4: Run live method tests
+            # Step 3: Run live method tests
             print("\n→ Running live method tests...")
             live_results = await run_live_method_tests(client)
 
-    return print_validation_report(
-        query_issues, model_issues, live_results, github_diff, github_query_issues
-    )
+    return print_validation_report(query_issues, model_issues, live_results)
 
 
 if __name__ == "__main__":

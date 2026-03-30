@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from datetime import datetime
+from enum import StrEnum
 from typing import Annotated, Any
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
@@ -173,9 +174,12 @@ class MemoryUtilization(UnraidBaseModel):
     used: int | None = None
     free: int | None = None
     available: int | None = None
+    active: int | None = None
+    buffcache: int | None = None
     percentTotal: float | None = None
     swapTotal: int | None = None
     swapUsed: int | None = None
+    swapFree: int | None = None
     percentSwapTotal: float | None = None
 
 
@@ -184,6 +188,144 @@ class Metrics(UnraidBaseModel):
 
     cpu: CpuUtilization = CpuUtilization()
     memory: MemoryUtilization = MemoryUtilization()
+
+
+# =============================================================================
+# Temperature Models
+# =============================================================================
+
+
+class SensorType(StrEnum):
+    """Temperature sensor type."""
+
+    CPU_PACKAGE = "CPU_PACKAGE"
+    CPU_CORE = "CPU_CORE"
+    MOTHERBOARD = "MOTHERBOARD"
+    CHIPSET = "CHIPSET"
+    GPU = "GPU"
+    DISK = "DISK"
+    NVME = "NVME"
+    AMBIENT = "AMBIENT"
+    VRM = "VRM"
+    CUSTOM = "CUSTOM"
+
+
+class TemperatureUnit(StrEnum):
+    """Temperature measurement unit."""
+
+    CELSIUS = "CELSIUS"
+    FAHRENHEIT = "FAHRENHEIT"
+    KELVIN = "KELVIN"
+    RANKINE = "RANKINE"
+
+
+class TemperatureStatus(StrEnum):
+    """Temperature status level."""
+
+    NORMAL = "NORMAL"
+    WARNING = "WARNING"
+    CRITICAL = "CRITICAL"
+    UNKNOWN = "UNKNOWN"
+
+
+class TemperatureReading(UnraidBaseModel):
+    """A temperature reading with value and unit."""
+
+    value: float | None = None
+    unit: TemperatureUnit | str | None = None
+    status: TemperatureStatus | str | None = None
+
+
+class TemperatureSensorSummary(UnraidBaseModel):
+    """A named sensor with its current reading (used in summary hottest/coolest)."""
+
+    name: str | None = None
+    current: TemperatureReading | None = None
+
+
+class TemperatureSensor(UnraidBaseModel):
+    """A full temperature sensor with current, min, max, and thresholds."""
+
+    id: str
+    name: str | None = None
+    type: SensorType | str | None = None
+    location: str | None = None
+    current: TemperatureReading | None = None
+    min: TemperatureReading | None = None
+    max: TemperatureReading | None = None
+    warning: int | None = None
+    critical: int | None = None
+    history: list[TemperatureReading] = []
+
+    @property
+    def is_critical(self) -> bool:
+        """Return True if the sensor status is CRITICAL."""
+        if self.current and self.current.status:
+            return str(self.current.status) == TemperatureStatus.CRITICAL
+        return False
+
+    @property
+    def is_warning(self) -> bool:
+        """Return True if the sensor status is WARNING."""
+        if self.current and self.current.status:
+            return str(self.current.status) == TemperatureStatus.WARNING
+        return False
+
+    @property
+    def temperature(self) -> float | None:
+        """Return the current temperature value."""
+        if self.current:
+            return self.current.value
+        return None
+
+
+class TemperatureSummary(UnraidBaseModel):
+    """Summary of temperature metrics across all sensors."""
+
+    average: float | None = None
+    hottest: TemperatureSensorSummary | None = None
+    coolest: TemperatureSensorSummary | None = None
+    warningCount: int | None = None
+    criticalCount: int | None = None
+
+
+class TemperatureMetrics(UnraidBaseModel):
+    """Temperature metrics container with summary and individual sensors."""
+
+    id: str | None = None
+    summary: TemperatureSummary | None = None
+    sensors: list[TemperatureSensor] = []
+
+    def get_sensors_by_type(
+        self, sensor_type: SensorType | str
+    ) -> list[TemperatureSensor]:
+        """Return sensors filtered by type.
+
+        Args:
+            sensor_type: The SensorType to filter by.
+
+        Returns:
+            List of matching TemperatureSensor objects.
+
+        """
+        return [s for s in self.sensors if s.type == str(sensor_type)]
+
+    @property
+    def disk_sensors(self) -> list[TemperatureSensor]:
+        """Return all DISK-type sensors."""
+        return self.get_sensors_by_type(SensorType.DISK)
+
+    @property
+    def nvme_sensors(self) -> list[TemperatureSensor]:
+        """Return all NVME-type sensors."""
+        return self.get_sensors_by_type(SensorType.NVME)
+
+    @property
+    def cpu_sensors(self) -> list[TemperatureSensor]:
+        """Return all CPU_PACKAGE and CPU_CORE sensors."""
+        return self.get_sensors_by_type(
+            SensorType.CPU_PACKAGE
+        ) + self.get_sensors_by_type(SensorType.CPU_CORE)
 
 
 # =============================================================================
@@ -404,6 +546,9 @@ class PhysicalDisk(UnraidBaseModel):
     smartStatus: str | None = None  # OK, UNKNOWN, FAILING, etc.
     temperature: float | None = None  # Temperature in Celsius
     isSpinning: bool | None = None
+    serialNum: str | None = None  # Disk serial number
+    firmwareRevision: str | None = None  # Firmware version
+    partitions: list[DiskPartition] | None = None  # Disk partitions
 
 
 # =============================================================================
@@ -604,12 +749,6 @@ class VmDomain(UnraidBaseModel):
     id: str
     name: str
     state: str | None = None
-    memory: int | None = None  # Memory in bytes
-    vcpu: int | None = None  # Number of virtual CPUs
-    autostart: bool | None = None
-    cpuMode: str | None = None
-    iconUrl: str | None = None
-    primaryGpu: str | None = None
 
     @property
     def is_running(self) -> bool:
@@ -712,6 +851,7 @@ class Share(UnraidBaseModel):
     cow: str | None = None  # Copy-on-write setting
     color: str | None = None  # Share color indicator
     luksStatus: str | None = None  # LUKS encryption status
+    comment: str | None = None  # Share comment/description
 
     @property
     def size_bytes(self) -> int | None:
@@ -814,11 +954,17 @@ class SystemMetrics(UnraidBaseModel):
     memory_used: int | None = None  # Used memory in bytes
     memory_free: int | None = None  # Free memory in bytes
     memory_available: int | None = None  # Available memory in bytes
+    memory_active: int | None = None  # Active memory in bytes
+    memory_buffcache: int | None = None  # Buffer/cache memory in bytes
 
     # Swap metrics
     swap_percent: float | None = None
     swap_total: int | None = None  # Total swap in bytes
     swap_used: int | None = None  # Used swap in bytes
+    swap_free: int | None = None  # Free swap in bytes
+
+    # Temperature metrics
+    temperature: TemperatureMetrics | None = None
 
     # Uptime
     uptime: ParsedDatetime = None  # System boot time
@@ -865,6 +1011,10 @@ class SystemMetrics(UnraidBaseModel):
             if mem_total is not None and mem_available is not None:
                 memory_used = max(0, mem_total - mem_available)
 
+        # Parse temperature data if available
+        temp_data = metrics.get("temperature")
+        temperature = TemperatureMetrics(**temp_data) if temp_data else None
+
         return cls(
             cpu_percent=cpu.get("percentTotal"),
             cpu_temperature=temps[0] if temps else None,
@@ -875,9 +1025,13 @@ class SystemMetrics(UnraidBaseModel):
             memory_used=memory_used,
             memory_free=memory.get("free"),
             memory_available=memory.get("available"),
+            memory_active=memory.get("active"),
+            memory_buffcache=memory.get("buffcache"),
             swap_percent=memory.get("percentSwapTotal"),
             swap_total=memory.get("swapTotal"),
             swap_used=memory.get("swapUsed"),
+            swap_free=memory.get("swapFree"),
+            temperature=temperature,
             uptime=os_info.get("uptime"),
         )
 
@@ -1282,6 +1436,11 @@ class MinigraphqlResponse(UnraidBaseModel):
 class Cloud(UnraidBaseModel):
     """Cloud settings information.
 
+    .. deprecated::
+        The ``cloud`` query was removed from the Unraid GraphQL API.
+        This model is kept for backward compatibility and will be
+        removed in a future release.
+
     Attributes:
         error: Any error message.
         apiKey: API key response details.
@@ -1318,6 +1477,11 @@ class DynamicRemoteAccessStatus(UnraidBaseModel):
 class Connect(UnraidBaseModel):
     """Unraid Connect information.
 
+    .. deprecated::
+        The ``connect`` query was removed from the Unraid GraphQL API.
+        This model is kept for backward compatibility and will be
+        removed in a future release.
+
     Attributes:
         id: Connect node ID.
         dynamicRemoteAccess: Dynamic remote access status.
@@ -1330,6 +1494,11 @@ class Connect(UnraidBaseModel):
 
 class RemoteAccess(UnraidBaseModel):
     """Remote access configuration.
+
+    .. deprecated::
+        The ``remoteAccess`` query was removed from the Unraid GraphQL
+        API. This model is kept for backward compatibility and will be
+        removed in a future release.
 
     Attributes:
         accessType: The type of WAN access (DYNAMIC, ALWAYS, DISABLED).
@@ -1660,9 +1829,16 @@ class DockerPortConflicts(UnraidBaseModel):
 
 
 class CpuCore(UnraidBaseModel):
-    """Individual CPU core utilization from subscription."""
+    """Individual CPU core utilization."""
 
     percentTotal: float | None = None
+    percentUser: float | None = None
+    percentSystem: float | None = None
+    percentIdle: float | None = None
+    percentNice: float | None = None
+    percentIrq: float | None = None
+    percentGuest: float | None = None
+    percentSteal: float | None = None
 
 
 class CpuMetrics(UnraidBaseModel):

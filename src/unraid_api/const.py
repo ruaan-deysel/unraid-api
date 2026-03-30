@@ -6,8 +6,8 @@ from __future__ import annotations
 # Version Requirements
 # =============================================================================
 
-MIN_API_VERSION = "4.29.2"
-MIN_UNRAID_VERSION = "7.2.3"
+MIN_API_VERSION = "4.31.1"
+MIN_UNRAID_VERSION = "7.2.4"
 
 # =============================================================================
 # Docker Container States
