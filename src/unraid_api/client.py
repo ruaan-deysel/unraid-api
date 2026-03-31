@@ -239,6 +239,27 @@ class UnraidClient:
         if host and len(host) >= 24 and all(ch not in host for ch in (".", ":", "/")):
             return "<redacted-host>"
 
+        # Additional safeguards: only log strings that look like a normal host[:port].
+        # - Reject values with whitespace or control characters.
+        # - Reject very long values that are unlikely to be hostnames.
+        # - Reject values where most characters are not typical hostname characters.
+        if any(ch.isspace() for ch in host):
+            return "<redacted-host>"
+
+        if len(host) > 255:
+            # Longer than any reasonable hostname/IP representation.
+            return "<redacted-host>"
+
+        # Keep letters, digits, dot, dash, colon and brackets (for IPv6).
+        safe_chars = set("abcdefghijklmnopqrstuvwxyz"
+                         "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                         "0123456789"
+                         ".:-[]")
+        safe_count = sum(1 for ch in host if ch in safe_chars)
+        # If fewer than 70% of characters are "host-like", assume it may be a secret.
+        if safe_count == 0 or safe_count / len(host) < 0.7:
+            return "<redacted-host>"
+
         return host or "<redacted-host>"
 
     @staticmethod
