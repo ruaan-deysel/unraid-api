@@ -134,7 +134,7 @@ class UnraidClient:
     def __repr__(self) -> str:
         """Safe repr that never exposes the API key."""
         return (
-            f"UnraidClient(host={self._get_clean_host()!r}, "
+            f"UnraidClient(host={self._sanitize_host_for_log()!r}, "
             f"port={self.https_port}, verify_ssl={self.verify_ssl})"
         )
 
@@ -168,7 +168,7 @@ class UnraidClient:
             _LOGGER.warning(
                 "SSL verification disabled for %s. "
                 "Connection is encrypted but server identity is not verified.",
-                self._get_clean_host(),
+                self._sanitize_host_for_log(),
             )
         else:
             ssl_context = True
@@ -207,8 +207,12 @@ class UnraidClient:
                 _LOGGER.debug("Error closing session", exc_info=True)
             self._session = None
 
-    def _get_clean_host(self) -> str:
-        """Get a sanitized host string safe for logging (no credentials or secrets)."""
+    def _sanitize_host_for_log(self) -> str:  # noqa: PLR0911
+        """Get a sanitized host string safe for logging (no credentials or secrets).
+
+        This method is ONLY for logging purposes and may return placeholder strings
+        like "<redacted-host>". Never use this for URL construction.
+        """
         raw_host = (self.host or "").strip()
         if not raw_host:
             return "<redacted-host>"
@@ -239,7 +243,87 @@ class UnraidClient:
         if host and len(host) >= 24 and all(ch not in host for ch in (".", ":", "/")):
             return "<redacted-host>"
 
+        # Additional safeguards: only log strings that look like a normal host[:port].
+        # - Reject values with whitespace or control characters.
+        # - Reject very long values that are unlikely to be hostnames.
+        # - Reject values where most characters are not typical hostname characters.
+        if any(ch.isspace() for ch in host):
+            return "<redacted-host>"
+
+        if len(host) > 255:
+            # Longer than any reasonable hostname/IP representation.
+            return "<redacted-host>"
+
+        # Keep letters, digits, dot, dash, colon and brackets (for IPv6).
+        safe_chars = set("abcdefghijklmnopqrstuvwxyz"
+                         "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                         "0123456789"
+                         ".:-[]")
+        safe_count = sum(1 for ch in host if ch in safe_chars)
+        # If fewer than 70% of characters are "host-like", assume it may be a secret.
+        if safe_count == 0 or safe_count / len(host) < 0.7:
+            return "<redacted-host>"
+
         return host or "<redacted-host>"
+
+    def _normalize_host_for_request(self) -> str:
+        """Normalize and validate the host for actual network requests.
+
+        This method MUST return a valid, routable hostname or IP address.
+        Never returns placeholder strings like "<redacted-host>".
+
+        Returns:
+            str: A valid hostname or IP address suitable for URL construction.
+
+        Raises:
+            UnraidConnectionError: If the host is invalid or cannot be normalized.
+        """
+        raw_host = (self.host or "").strip()
+        if not raw_host:
+            raise UnraidConnectionError("Host cannot be empty")
+
+        # If this looks like a URL, extract the hostname
+        if "://" in raw_host:
+            try:
+                parsed = urlparse(raw_host)
+                hostname = parsed.hostname
+                if not hostname:
+                    raise UnraidConnectionError(
+                        f"Could not extract hostname from URL: {raw_host}"
+                    )
+                # Preserve port from URL if present
+                if parsed.port:
+                    return f"{hostname}:{parsed.port}"
+                return hostname
+            except Exception as e:
+                raise UnraidConnectionError(
+                    f"Invalid host URL format: {raw_host}"
+                ) from e
+
+        # Non-URL host: strip any userinfo (user:pass@) if present
+        host = raw_host
+        if "@" in host:
+            host = host.split("@", 1)[1]
+
+        host = host.rstrip("/")
+
+        # Basic validation: ensure it's not empty after normalization
+        if not host:
+            raise UnraidConnectionError("Host cannot be empty after normalization")
+
+        # Reject hosts with whitespace (likely invalid)
+        if any(ch.isspace() for ch in host):
+            raise UnraidConnectionError(
+                "Host contains whitespace characters, which is invalid"
+            )
+
+        # Reject unreasonably long hostnames
+        if len(host) > 255:
+            raise UnraidConnectionError(
+                "Host exceeds maximum length of 255 characters"
+            )
+
+        return host
 
     @staticmethod
     def _sanitize_url(url: str) -> str:
@@ -292,7 +376,8 @@ class UnraidClient:
         if self._session is None:
             raise UnraidConnectionError("Failed to create HTTP session")
 
-        clean_host = self._get_clean_host()
+        # Get validated host for URL construction
+        request_host = self._normalize_host_for_request()
 
         # Short-circuit: if http_port == https_port, assume this port is configured
         # to serve HTTPS and skip the plain HTTP probe to avoid a likely 400 from nginx.
@@ -300,7 +385,7 @@ class UnraidClient:
             _LOGGER.debug(
                 "http_port == https_port (%d), assuming HTTPS for %s",
                 self.http_port,
-                clean_host,
+                self._sanitize_host_for_log(),
             )
             return (None, True)
 
@@ -308,8 +393,11 @@ class UnraidClient:
             "" if self.http_port == DEFAULT_HTTP_PORT else f":{self.http_port}"
         )
 
-        http_url = f"http://{clean_host}{http_port_suffix}/graphql"
+        http_url = f"http://{request_host}{http_port_suffix}/graphql"
         _LOGGER.debug("Checking for redirect at %s", self._sanitize_url(http_url))
+
+        # Get sanitized host for logging
+        clean_host = self._sanitize_host_for_log()
 
         try:
             async with self._session.get(http_url, allow_redirects=False) as response:
@@ -434,7 +522,7 @@ class UnraidClient:
             if redirect_url:
                 self._resolved_url = redirect_url
             else:
-                clean_host = self._get_clean_host()
+                request_host = self._normalize_host_for_request()
                 if use_ssl:
                     protocol = "https"
                     port_suffix = (
@@ -449,7 +537,7 @@ class UnraidClient:
                         if self.http_port != DEFAULT_HTTP_PORT
                         else ""
                     )
-                self._resolved_url = f"{protocol}://{clean_host}{port_suffix}/graphql"
+                self._resolved_url = f"{protocol}://{request_host}{port_suffix}/graphql"
             _LOGGER.debug("Using URL: %s", self._sanitize_url(self._resolved_url))
 
         url = self._resolved_url
@@ -630,7 +718,7 @@ class UnraidClient:
             if redirect_url:
                 self._resolved_url = redirect_url
             else:
-                clean_host = self._get_clean_host()
+                request_host = self._normalize_host_for_request()
                 if use_ssl:
                     protocol = "https"
                     port_suffix = (
@@ -645,7 +733,7 @@ class UnraidClient:
                         if self.http_port != DEFAULT_HTTP_PORT
                         else ""
                     )
-                self._resolved_url = f"{protocol}://{clean_host}{port_suffix}/graphql"
+                self._resolved_url = f"{protocol}://{request_host}{port_suffix}/graphql"
 
     async def _ws_connect_and_init(
         self,
