@@ -104,34 +104,34 @@ class TestClientHostParsing:
     """Tests for host parsing functionality."""
 
     def test_get_clean_host_without_protocol(self, api_key: str) -> None:
-        """Test _get_clean_host without protocol prefix."""
+        """Test _normalize_host_for_request without protocol prefix."""
         client = UnraidClient("192.168.1.100", api_key)
 
-        assert client._get_clean_host() == "192.168.1.100"
+        assert client._normalize_host_for_request() == "192.168.1.100"
 
     def test_get_clean_host_with_http(self, api_key: str) -> None:
-        """Test _get_clean_host with http:// prefix."""
+        """Test _normalize_host_for_request with http:// prefix."""
         client = UnraidClient("http://192.168.1.100", api_key)
 
-        assert client._get_clean_host() == "192.168.1.100"
+        assert client._normalize_host_for_request() == "192.168.1.100"
 
     def test_get_clean_host_with_https(self, api_key: str) -> None:
-        """Test _get_clean_host with https:// prefix."""
+        """Test _normalize_host_for_request with https:// prefix."""
         client = UnraidClient("https://192.168.1.100", api_key)
 
-        assert client._get_clean_host() == "192.168.1.100"
+        assert client._normalize_host_for_request() == "192.168.1.100"
 
     def test_get_clean_host_strips_trailing_slash(self, api_key: str) -> None:
-        """Test _get_clean_host strips trailing slashes."""
+        """Test _normalize_host_for_request strips trailing slashes."""
         client = UnraidClient("192.168.1.100/", api_key)
 
-        assert client._get_clean_host() == "192.168.1.100"
+        assert client._normalize_host_for_request() == "192.168.1.100"
 
     def test_get_clean_host_with_full_url(self, api_key: str) -> None:
-        """Test _get_clean_host with full URL including path."""
+        """Test _normalize_host_for_request with full URL including path."""
         client = UnraidClient("https://myserver.myunraid.net/", api_key)
 
-        assert client._get_clean_host() == "myserver.myunraid.net"
+        assert client._normalize_host_for_request() == "myserver.myunraid.net"
 
 
 class TestClientSessionProperty:
