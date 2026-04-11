@@ -13,6 +13,7 @@ from urllib.parse import urlparse, urlunparse
 
 import aiohttp
 
+from unraid_api.capabilities import ServerCapabilities, build_introspection_query
 from unraid_api.exceptions import (
     UnraidAPIError,
     UnraidAuthenticationError,
@@ -43,8 +44,11 @@ if TYPE_CHECKING:
         Flash,
         LogFile,
         MemoryMetrics,
+        Network,
+        Notification,
         NotificationOverview,
         Owner,
+        ParityCheck,
         ParityHistoryEntry,
         Plugin,
         Registration,
@@ -130,6 +134,8 @@ class UnraidClient:
         self._session: aiohttp.ClientSession | None = session
         self._owns_session: bool = session is None
         self._resolved_url: str | None = None
+        self._capabilities: ServerCapabilities | None = None
+        self._capabilities_lock: asyncio.Lock = asyncio.Lock()
 
     def __repr__(self) -> str:
         """Safe repr that never exposes the API key."""
@@ -256,10 +262,7 @@ class UnraidClient:
 
         # Keep letters, digits, dot, dash, colon and brackets (for IPv6).
         safe_chars = set(
-            "abcdefghijklmnopqrstuvwxyz"
-            "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-            "0123456789"
-            ".:-[]"
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.:-[]"
         )
         safe_count = sum(1 for ch in host if ch in safe_chars)
         # If fewer than 70% of characters are "host-like", assume it may be a secret.
@@ -686,6 +689,51 @@ class UnraidClient:
         """
         return await self.query(mutation, variables)
 
+    async def get_capabilities(self) -> ServerCapabilities:
+        """Return cached server capabilities, running introspection if needed.
+
+        Uses a single aliased `__type` query to discover which fields the
+        server supports, then caches the result for the lifetime of the
+        client. If introspection fails (disabled, permission, or network
+        error), falls back to permissive capabilities so queries are not
+        blocked — the existing error-response path still catches real
+        failures.
+        """
+        if self._capabilities is not None:
+            return self._capabilities
+        async with self._capabilities_lock:
+            if self._capabilities is not None:
+                return self._capabilities
+            try:
+                response = await self.query(build_introspection_query())
+            except UnraidAuthenticationError:
+                raise
+            except Exception as err:
+                _LOGGER.debug(
+                    "Capability introspection failed (%s); falling back to permissive",
+                    err,
+                )
+                self._capabilities = ServerCapabilities.permissive()
+                return self._capabilities
+            self._capabilities = ServerCapabilities.from_introspection_response(
+                response
+            )
+            return self._capabilities
+
+    def _require_capability(self, feature: str, path: str) -> None:
+        """Raise UnraidAPIError when a required capability is missing.
+
+        Safe to call only after `get_capabilities()` has populated the cache;
+        typical callers do `await self.get_capabilities()` first.
+        """
+        caps = self._capabilities
+        if caps is None or caps.has(path):
+            return
+        raise UnraidAPIError(
+            f"{feature} is not available on this Unraid server "
+            f"(missing {path}). Update the Unraid API plugin to enable it."
+        )
+
     def _get_ws_url(self) -> str:
         """Derive WebSocket URL from the resolved HTTP URL.
 
@@ -1101,9 +1149,9 @@ class UnraidClient:
     async def typed_get_containers(self) -> list[DockerContainer]:
         """Get all Docker containers as Pydantic models.
 
-        Attempts to query extended fields (isUpdateAvailable, webUiUrl,
-        iconUrl) first. Falls back to core fields if the server's API
-        version does not support them.
+        Composes the GraphQL query from server capabilities so older Unraid
+        API versions (without fields like `labels`, `isUpdateAvailable`, or
+        the full Tailscale subselection) still work.
 
         Returns:
             List of DockerContainer models.
@@ -1111,71 +1159,117 @@ class UnraidClient:
         """
         from unraid_api.models import DockerContainer
 
-        extended_query = """
-            query {
-                docker {
-                    containers {
-                        id
-                        names
-                        image
-                        imageId
-                        state
-                        status
-                        autoStart
-                        isUpdateAvailable
-                        isOrphaned
-                        webUiUrl
-                        iconUrl
-                        command
-                        created
-                        sizeRootFs
-                        sizeRw
-                        sizeLog
-                        autoStartOrder
-                        autoStartWait
-                        shell
-                        templatePath
-                        projectUrl
-                        registryUrl
-                        supportUrl
-                        tailscaleEnabled
-                        tailscaleStatus { hostname dnsName online }
-                        isRebuildReady
-                        templatePorts { ip privatePort publicPort type }
-                        lanIpPorts
-                        hostConfig { networkMode }
-                        ports { ip privatePort publicPort type }
-                    }
-                }
-            }
-        """
-        core_query = """
-            query {
-                docker {
-                    containers {
-                        id
-                        names
-                        image
-                        imageId
-                        state
-                        status
-                        autoStart
-                        ports { ip privatePort publicPort type }
-                    }
-                }
-            }
-        """
-        try:
-            result = await self.query(extended_query)
-        except UnraidAPIError as exc:
-            if isinstance(
-                exc,
-                UnraidAuthenticationError | UnraidConnectionError | UnraidTimeoutError,
-            ):
-                raise
-            result = await self.query(core_query)
+        caps = await self.get_capabilities()
+        query_str = self._build_containers_query(caps)
+        result = await self.query(query_str)
         containers = result.get("docker", {}).get("containers", []) or []
         return [DockerContainer.from_api_response(c) for c in containers]
+
+    def _build_containers_query(self, caps: ServerCapabilities) -> str:
+        """Compose a docker.containers GraphQL query from capabilities.
+
+        Core fields that every Unraid API version has exposed are always
+        included. Every other field is gated on introspection so an old
+        server never sees a field it cannot resolve. In permissive mode
+        (introspection unavailable) every optional field is requested.
+        """
+
+        def has(field: str) -> bool:
+            return caps.has(f"DockerContainer.{field}")
+
+        def ts_has(field: str) -> bool:
+            return caps.has(f"TailscaleStatus.{field}")
+
+        core = [
+            "id",
+            "names",
+            "image",
+            "imageId",
+            "state",
+            "status",
+            "autoStart",
+        ]
+        extended_scalar = [
+            f
+            for f in (
+                "isUpdateAvailable",
+                "isOrphaned",
+                "webUiUrl",
+                "iconUrl",
+                "command",
+                "created",
+                "sizeRootFs",
+                "sizeRw",
+                "sizeLog",
+                "autoStartOrder",
+                "autoStartWait",
+                "shell",
+                "templatePath",
+                "projectUrl",
+                "registryUrl",
+                "supportUrl",
+                "tailscaleEnabled",
+                "isRebuildReady",
+                "lanIpPorts",
+                "labels",
+                "networkSettings",
+                "mounts",
+            )
+            if has(f)
+        ]
+
+        fragments: list[str] = list(core) + extended_scalar
+
+        if has("ports"):
+            fragments.append("ports { ip privatePort publicPort type }")
+        if has("templatePorts"):
+            fragments.append("templatePorts { ip privatePort publicPort type }")
+        if has("hostConfig"):
+            fragments.append("hostConfig { networkMode }")
+
+        if has("tailscaleStatus"):
+            ts_fields = [
+                f
+                for f in (
+                    "hostname",
+                    "dnsName",
+                    "online",
+                    "version",
+                    "latestVersion",
+                    "updateAvailable",
+                    "relay",
+                    "relayName",
+                    "tailscaleIps",
+                    "primaryRoutes",
+                    "isExitNode",
+                    "webUiUrl",
+                    "keyExpiry",
+                    "keyExpiryDays",
+                    "keyExpired",
+                    "backendState",
+                    "authUrl",
+                )
+                if ts_has(f)
+            ]
+            if ts_has("exitNodeStatus"):
+                ts_fields.append("exitNodeStatus { online tailscaleIps }")
+            # Always include `online` as a baseline if nothing else matched
+            # (old servers exposed at minimum a boolean-shaped status).
+            if not ts_fields:
+                ts_fields = ["online"]
+            fragments.append("tailscaleStatus { " + " ".join(ts_fields) + " }")
+
+        indent = "                        "
+        body = ("\n" + indent).join(fragments)
+        return (
+            "query {\n"
+            "            docker {\n"
+            "                containers {\n"
+            f"                    {body}\n"
+            "                }\n"
+            "            }\n"
+            "        }"
+        )
 
     async def typed_get_vms(self) -> list[VmDomain]:
         """Get all virtual machines as Pydantic models.
@@ -1846,12 +1940,34 @@ class UnraidClient:
                         registryUrl
                         supportUrl
                         tailscaleEnabled
-                        tailscaleStatus { hostname dnsName online }
+                        tailscaleStatus {
+                            hostname
+                            dnsName
+                            online
+                            version
+                            latestVersion
+                            updateAvailable
+                            relay
+                            relayName
+                            tailscaleIps
+                            primaryRoutes
+                            isExitNode
+                            exitNodeStatus { online tailscaleIps }
+                            webUiUrl
+                            keyExpiry
+                            keyExpiryDays
+                            keyExpired
+                            backendState
+                            authUrl
+                        }
                         isRebuildReady
                         templatePorts { ip privatePort publicPort type }
                         lanIpPorts
                         hostConfig { networkMode }
                         ports { ip privatePort publicPort type }
+                        labels
+                        networkSettings
+                        mounts
                     }
                 }
             }
@@ -3689,3 +3805,364 @@ class UnraidClient:
         async for data in self.subscribe(subscription):
             array_data = data.get("arraySubscription", {})
             yield ArraySubscriptionUpdate(**array_data)
+
+    async def subscribe_notification_added(
+        self,
+    ) -> AsyncGenerator[Notification, None]:
+        """Subscribe to new notifications as they are created.
+
+        Yields a ``Notification`` model for each notification raised on
+        the Unraid server. Useful for pushing Unraid alerts into Home
+        Assistant without polling.
+
+        Yields:
+            Notification for each new notification event.
+
+        """
+        from unraid_api.models import Notification
+
+        await self.get_capabilities()
+        self._require_capability(
+            "notificationAdded subscription", "Subscription.notificationAdded"
+        )
+
+        subscription = """
+            subscription {
+                notificationAdded {
+                    id
+                    title
+                    subject
+                    description
+                    importance
+                    link
+                    type
+                    timestamp
+                    formattedTimestamp
+                }
+            }
+        """
+        async for data in self.subscribe(subscription):
+            payload = data.get("notificationAdded", {})
+            yield Notification(**payload)
+
+    async def subscribe_notifications_overview(
+        self,
+    ) -> AsyncGenerator[NotificationOverview, None]:
+        """Subscribe to live notification counts.
+
+        Yields a ``NotificationOverview`` with unread and archive
+        counts broken down by importance.
+
+        Yields:
+            NotificationOverview for each overview update event.
+
+        """
+        from unraid_api.models import NotificationOverview
+
+        await self.get_capabilities()
+        self._require_capability(
+            "notificationsOverview subscription",
+            "Subscription.notificationsOverview",
+        )
+
+        subscription = """
+            subscription {
+                notificationsOverview {
+                    unread { info warning alert total }
+                    archive { info warning alert total }
+                }
+            }
+        """
+        async for data in self.subscribe(subscription):
+            payload = data.get("notificationsOverview", {})
+            yield NotificationOverview(**payload)
+
+    async def subscribe_notifications_warnings_and_alerts(
+        self,
+    ) -> AsyncGenerator[list[Notification], None]:
+        """Subscribe to the live list of warning/alert notifications.
+
+        Yields a list of ``Notification`` models whenever the server's
+        warnings-and-alerts list changes.
+
+        Yields:
+            List of Notification models for each update event.
+
+        """
+        from unraid_api.models import Notification
+
+        await self.get_capabilities()
+        self._require_capability(
+            "notificationsWarningsAndAlerts subscription",
+            "Subscription.notificationsWarningsAndAlerts",
+        )
+
+        subscription = """
+            subscription {
+                notificationsWarningsAndAlerts {
+                    id
+                    title
+                    subject
+                    description
+                    importance
+                    link
+                    type
+                    timestamp
+                    formattedTimestamp
+                }
+            }
+        """
+        async for data in self.subscribe(subscription):
+            items = data.get("notificationsWarningsAndAlerts") or []
+            yield [Notification(**item) for item in items]
+
+    async def subscribe_parity_history(
+        self,
+    ) -> AsyncGenerator[ParityCheck, None]:
+        """Subscribe to live parity-check progress.
+
+        Yields a ``ParityCheck`` model for each status update emitted
+        by the server during a parity check or parity history event.
+
+        Yields:
+            ParityCheck for each parity-history update event.
+
+        """
+        from unraid_api.models import ParityCheck
+
+        await self.get_capabilities()
+        self._require_capability(
+            "parityHistorySubscription", "Subscription.parityHistorySubscription"
+        )
+
+        subscription = """
+            subscription {
+                parityHistorySubscription {
+                    date
+                    duration
+                    speed
+                    status
+                    errors
+                    progress
+                    correcting
+                    paused
+                    running
+                }
+            }
+        """
+        async for data in self.subscribe(subscription):
+            payload = data.get("parityHistorySubscription", {})
+            yield ParityCheck(**payload)
+
+    # =========================================================================
+    # Network Query
+    # =========================================================================
+
+    async def get_network(self) -> dict[str, Any]:
+        """Get network configuration and access URLs.
+
+        Returns:
+            Dict with ``id`` and ``accessUrls`` entries as returned by
+            the server.
+
+        """
+        await self.get_capabilities()
+        self._require_capability("network query", "Query.network")
+
+        query_str = """
+            query {
+                network {
+                    id
+                    accessUrls { type name ipv4 ipv6 }
+                }
+            }
+        """
+        result = await self.query(query_str)
+        return dict(result.get("network", {}))
+
+    async def typed_get_network(self) -> Network:
+        """Get network configuration as a Pydantic model.
+
+        Returns:
+            Network model with parsed access URLs.
+
+        """
+        from unraid_api.models import Network
+
+        data = await self.get_network()
+        return Network(**data)
+
+    # =========================================================================
+    # Notification Mutations
+    # =========================================================================
+
+    async def create_notification(
+        self,
+        *,
+        title: str,
+        subject: str,
+        description: str,
+        importance: str,
+        link: str | None = None,
+    ) -> Notification:
+        """Create a new notification on the Unraid server.
+
+        Args:
+            title: Notification title.
+            subject: Short subject line.
+            description: Full description body.
+            importance: One of "INFO", "WARNING", "ALERT".
+            link: Optional URL for click-through.
+
+        Returns:
+            Created Notification model.
+
+        """
+        from unraid_api.models import Notification
+
+        await self.get_capabilities()
+        self._require_capability(
+            "createNotification mutation", "Mutation.createNotification"
+        )
+
+        mutation = """
+            mutation CreateNotification($input: NotificationData!) {
+                createNotification(input: $input) {
+                    id
+                    title
+                    subject
+                    description
+                    importance
+                    link
+                    type
+                    timestamp
+                    formattedTimestamp
+                }
+            }
+        """
+        input_data: dict[str, Any] = {
+            "title": title,
+            "subject": subject,
+            "description": description,
+            "importance": importance,
+        }
+        if link is not None:
+            input_data["link"] = link
+        result = await self.mutate(mutation, {"input": input_data})
+        created: dict[str, Any] = dict(result.get("createNotification") or {})
+        return Notification(**created)
+
+    async def notify_if_unique(
+        self,
+        *,
+        title: str,
+        subject: str,
+        description: str,
+        importance: str,
+        link: str | None = None,
+    ) -> Notification | None:
+        """Create a notification only if no identical one already exists.
+
+        Args:
+            title: Notification title.
+            subject: Short subject line.
+            description: Full description body.
+            importance: One of "INFO", "WARNING", "ALERT".
+            link: Optional URL for click-through.
+
+        Returns:
+            Created Notification model, or None if a duplicate already
+            existed and the server suppressed it.
+
+        """
+        from unraid_api.models import Notification
+
+        await self.get_capabilities()
+        self._require_capability("notifyIfUnique mutation", "Mutation.notifyIfUnique")
+
+        mutation = """
+            mutation NotifyIfUnique($input: NotificationData!) {
+                notifyIfUnique(input: $input) {
+                    id
+                    title
+                    subject
+                    description
+                    importance
+                    link
+                    type
+                    timestamp
+                    formattedTimestamp
+                }
+            }
+        """
+        input_data: dict[str, Any] = {
+            "title": title,
+            "subject": subject,
+            "description": description,
+            "importance": importance,
+        }
+        if link is not None:
+            input_data["link"] = link
+        result = await self.mutate(mutation, {"input": input_data})
+        payload = result.get("notifyIfUnique")
+        if payload is None:
+            return None
+        return Notification(**payload)
+
+    # =========================================================================
+    # Temperature Config Mutation
+    # =========================================================================
+
+    async def update_temperature_config(
+        self,
+        *,
+        enabled: bool | None = None,
+        polling_interval: int | None = None,
+        default_unit: str | None = None,
+        sensors: dict[str, Any] | None = None,
+        thresholds: dict[str, Any] | None = None,
+        history: dict[str, Any] | None = None,
+    ) -> bool:
+        """Update server-side temperature monitoring configuration.
+
+        Args:
+            enabled: Enable or disable temperature monitoring.
+            polling_interval: Polling interval in seconds.
+            default_unit: "CELSIUS" or "FAHRENHEIT".
+            sensors: Optional SensorsConfigInput dict.
+            thresholds: Optional ThresholdsConfigInput dict with keys
+                ``cpu_warning``, ``cpu_critical``, ``disk_warning``,
+                ``disk_critical``, ``warning``, ``critical``.
+            history: Optional HistoryConfigInput dict with ``max_readings``
+                and ``retention_ms``.
+
+        Returns:
+            True when the server accepted the new configuration.
+
+        """
+        await self.get_capabilities()
+        self._require_capability(
+            "updateTemperatureConfig mutation",
+            "Mutation.updateTemperatureConfig",
+        )
+
+        mutation = """
+            mutation UpdateTemperatureConfig($input: TemperatureConfigInput!) {
+                updateTemperatureConfig(input: $input)
+            }
+        """
+        input_data: dict[str, Any] = {}
+        if enabled is not None:
+            input_data["enabled"] = enabled
+        if polling_interval is not None:
+            input_data["polling_interval"] = polling_interval
+        if default_unit is not None:
+            input_data["default_unit"] = default_unit
+        if sensors is not None:
+            input_data["sensors"] = sensors
+        if thresholds is not None:
+            input_data["thresholds"] = thresholds
+        if history is not None:
+            input_data["history"] = history
+        result = await self.mutate(mutation, {"input": input_data})
+        return bool(result.get("updateTemperatureConfig", False))

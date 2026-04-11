@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-04-11
+
+### Added
+
+- **Server capability detection (Layer 1 backward compatibility)** — `UnraidClient.get_capabilities()` runs a single aliased `__type` introspection query on first use and caches the result, letting the client target multiple Unraid API versions from one codebase
+  - New `ServerCapabilities` class with dotted-path lookup: `has("Query.network")`, `has_all(...)`, `has_any(...)`, and a `permissive()` factory for introspection-failure fallback
+  - Lazy, lock-guarded initialization via `asyncio.Lock`; auth errors propagate, all other introspection failures fall back to permissive mode so queries are never blocked
+  - `typed_get_containers()` now composes its GraphQL query from capabilities and only requests fields the server actually exposes; the old extended→core fallback has been removed
+  - New `capabilities.py` module exports `ServerCapabilities` and `build_introspection_query()`
+- **Notification subscriptions** — Three new real-time subscriptions for pushing Unraid notifications into Home Assistant without polling
+  - `subscribe_notification_added()` yields a `Notification` for each new notification
+  - `subscribe_notifications_overview()` yields `NotificationOverview` counts on each change
+  - `subscribe_notifications_warnings_and_alerts()` yields a `list[Notification]` of active warnings/alerts
+- **Parity history subscription** — `subscribe_parity_history()` yields `ParityCheck` models for live progress updates during a parity check
+- **Notification mutations** — `create_notification()` creates a new notification, and `notify_if_unique()` creates one only when no duplicate exists (returns `None` on duplicate)
+- **Temperature configuration mutation** — `update_temperature_config()` wraps the `updateTemperatureConfig` mutation for updating server-side temperature monitoring settings (enabled, polling interval, default unit, sensors, thresholds, history)
+- **Network query** — `get_network()` and `typed_get_network()` expose the `network` query with access URLs (LAN/WAN/etc.)
+- **New models** — `Network`, `AccessUrl`, and `TailscaleExitNodeStatus` exported from `unraid_api`
+- **Feature gating** — The 9 new top-level methods (`get_network`, `typed_get_network`, `create_notification`, `notify_if_unique`, `update_temperature_config`, and the 4 new subscriptions) raise a clean `UnraidAPIError` on servers that don't expose the underlying GraphQL field, pointing users at the Unraid API plugin update path
+
+### Changed
+
+- **TailscaleStatus model expanded from 3 to 18 fields** — `typed_get_containers()` now requests and parses the full Tailscale status: `hostname`, `dnsName`, `online`, `version`, `latestVersion`, `updateAvailable`, `relay`, `relayName`, `tailscaleIps`, `primaryRoutes`, `isExitNode`, `exitNodeStatus`, `webUiUrl`, `keyExpiry`, `keyExpiryDays`, `keyExpired`, `backendState`, `authUrl`
+- **ParityCheck model extended** — Added `date` (parsed datetime), `duration` (int seconds), and `correcting` (bool) fields for full parity-history payload shape; `speed` type changed from `int | None` to `str | None` to match the server's string-formatted rate
+
+### Fixed
+
+- **Older Unraid servers no longer break on extended container fields** — Capability-composed queries mean servers without `labels`, `networkSettings`, `mounts`, `isUpdateAvailable`, or the full Tailscale subselection get a query that only asks for what they support, instead of relying on a 400-response fallback
+
 ## [1.8.0] - 2026-03-31
 
 ### Security

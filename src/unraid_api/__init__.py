@@ -15,6 +15,7 @@ from unraid_api.exceptions import (
     UnraidVersionError,
 )
 from unraid_api.models import (
+    AccessUrl,
     ApiKey,
     ApiKeyResponse,
     ArrayCapacity,
@@ -49,6 +50,7 @@ from unraid_api.models import (
     MemoryUtilization,
     Metrics,
     MinigraphqlResponse,
+    Network,
     Notification,
     NotificationOverview,
     NotificationOverviewCounts,
@@ -68,6 +70,7 @@ from unraid_api.models import (
     Share,
     SystemInfo,
     SystemMetrics,
+    TailscaleExitNodeStatus,
     TailscaleStatus,
     TemperatureMetrics,
     TemperatureReading,
@@ -89,6 +92,7 @@ from unraid_api.models import (
 __all__ = [
     "MIN_API_VERSION",
     "MIN_UNRAID_VERSION",
+    "AccessUrl",
     "ApiKey",
     "ApiKeyResponse",
     "ArrayCapacity",
@@ -123,6 +127,7 @@ __all__ = [
     "MemoryUtilization",
     "Metrics",
     "MinigraphqlResponse",
+    "Network",
     "Notification",
     "NotificationOverview",
     "NotificationOverviewCounts",
@@ -142,6 +147,7 @@ __all__ = [
     "Share",
     "SystemInfo",
     "SystemMetrics",
+    "TailscaleExitNodeStatus",
     "TailscaleStatus",
     "TemperatureMetrics",
     "TemperatureReading",

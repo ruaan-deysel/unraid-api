@@ -2356,6 +2356,9 @@ class TestTypedGetContainersMethod:
             async with UnraidClient(
                 "192.168.1.100", "test-key", verify_ssl=False
             ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
                 result = await client.typed_get_containers()
 
                 assert isinstance(result, list)
@@ -2382,6 +2385,9 @@ class TestTypedGetContainersMethod:
             async with UnraidClient(
                 "192.168.1.100", "test-key", verify_ssl=False
             ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
                 result = await client.typed_get_containers()
 
                 assert isinstance(result, list)
@@ -2463,6 +2469,9 @@ class TestTypedGetContainersMethod:
             async with UnraidClient(
                 "192.168.1.100", "test-key", verify_ssl=False
             ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
                 result = await client.typed_get_containers()
 
                 assert len(result) == 1
@@ -2483,6 +2492,221 @@ class TestTypedGetContainersMethod:
             ) as client:
                 with pytest.raises(UnraidAuthenticationError):
                     await client.typed_get_containers()
+
+    async def test_typed_get_containers_populates_full_tailscale_status(
+        self,
+    ) -> None:
+        """Extended query must request and parse every TailscaleStatus field.
+
+        HA integrations need key-expiry warnings, update-available status,
+        exit-node configuration, and the assigned tailnet IPs — all of
+        which live on TailscaleStatus but were previously truncated.
+        """
+        from unraid_api.models import DockerContainer
+
+        payload_ts = {
+            "hostname": "plex",
+            "dnsName": "plex.tail12345.ts.net.",
+            "online": True,
+            "version": "1.80.0",
+            "latestVersion": "1.82.5",
+            "updateAvailable": True,
+            "relay": "sea",
+            "relayName": "Seattle",
+            "tailscaleIps": ["100.64.0.2", "fd7a:115c:a1e0::2"],
+            "primaryRoutes": ["10.0.0.0/24"],
+            "isExitNode": False,
+            "exitNodeStatus": {
+                "online": True,
+                "tailscaleIps": ["100.64.0.3"],
+            },
+            "webUiUrl": "http://100.64.0.2:32400",
+            "keyExpiry": "2026-10-01T12:00:00Z",
+            "keyExpiryDays": 42,
+            "keyExpired": False,
+            "backendState": "Running",
+            "authUrl": None,
+        }
+
+        captured_requests: list[str] = []
+
+        async def capture(url, **kwargs):  # type: ignore[no-untyped-def]
+            body = kwargs.get("json") or {}
+            captured_requests.append(body.get("query", ""))
+            from aioresponses.core import CallbackResult
+
+            return CallbackResult(
+                status=200,
+                payload={
+                    "data": {
+                        "docker": {
+                            "containers": [
+                                {
+                                    "id": "container:abc",
+                                    "names": ["/plex"],
+                                    "image": "plexinc/pms-docker",
+                                    "state": "running",
+                                    "status": "Up 5 days",
+                                    "autoStart": True,
+                                    "ports": [],
+                                    "tailscaleStatus": payload_ts,
+                                },
+                            ]
+                        }
+                    }
+                },
+            )
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post("http://192.168.1.100/graphql", callback=capture)
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                result = await client.typed_get_containers()
+
+        assert captured_requests, "no GraphQL request was captured"
+        query = captured_requests[0]
+        for needed in (
+            "version",
+            "latestVersion",
+            "updateAvailable",
+            "relay",
+            "relayName",
+            "tailscaleIps",
+            "primaryRoutes",
+            "isExitNode",
+            "exitNodeStatus",
+            "keyExpiry",
+            "keyExpiryDays",
+            "keyExpired",
+            "backendState",
+            "authUrl",
+        ):
+            assert needed in query, f"{needed} not in query"
+
+        assert len(result) == 1
+        ts = result[0].tailscaleStatus
+        assert isinstance(result[0], DockerContainer)
+        assert ts is not None
+        assert ts.version == "1.80.0"
+        assert ts.latestVersion == "1.82.5"
+        assert ts.updateAvailable is True
+        assert ts.relay == "sea"
+        assert ts.relayName == "Seattle"
+        assert ts.tailscaleIps == ["100.64.0.2", "fd7a:115c:a1e0::2"]
+        assert ts.primaryRoutes == ["10.0.0.0/24"]
+        assert ts.isExitNode is False
+        assert ts.exitNodeStatus is not None
+        assert ts.exitNodeStatus.online is True
+        assert ts.exitNodeStatus.tailscaleIps == ["100.64.0.3"]
+        assert ts.keyExpiryDays == 42
+        assert ts.keyExpired is False
+        assert ts.backendState == "Running"
+
+    async def test_typed_get_containers_populates_labels_network_and_mounts(
+        self,
+    ) -> None:
+        """Extended query must request and parse labels, networkSettings, mounts.
+
+        Home Assistant discovery relies on container labels, and network
+        IP/gateway data live under networkSettings. Mounts are needed so
+        users can tell at a glance what host paths a container maps.
+        """
+        from unraid_api.models import DockerContainer
+
+        payload_labels = {
+            "net.unraid.docker.webui": "http://[IP]:[PORT:32400]",
+            "net.unraid.docker.icon": "plex.png",
+        }
+        payload_network_settings = {
+            "Networks": {
+                "bridge": {
+                    "IPAddress": "172.17.0.2",
+                    "Gateway": "172.17.0.1",
+                    "MacAddress": "02:42:ac:11:00:02",
+                }
+            }
+        }
+        payload_mounts = [
+            {
+                "Type": "bind",
+                "Source": "/mnt/user/appdata/plex",
+                "Destination": "/config",
+                "Mode": "rw",
+                "RW": True,
+            },
+            {
+                "Type": "bind",
+                "Source": "/mnt/user/media",
+                "Destination": "/media",
+                "Mode": "ro",
+                "RW": False,
+            },
+        ]
+
+        captured_requests: list[str] = []
+
+        async def capture(url, **kwargs):  # type: ignore[no-untyped-def]
+            body = kwargs.get("json") or {}
+            captured_requests.append(body.get("query", ""))
+            from aioresponses.core import CallbackResult
+
+            return CallbackResult(
+                status=200,
+                payload={
+                    "data": {
+                        "docker": {
+                            "containers": [
+                                {
+                                    "id": "container:abc123",
+                                    "names": ["/plex"],
+                                    "image": "plexinc/pms-docker",
+                                    "state": "running",
+                                    "status": "Up 5 days",
+                                    "autoStart": True,
+                                    "ports": [],
+                                    "labels": payload_labels,
+                                    "networkSettings": payload_network_settings,
+                                    "mounts": payload_mounts,
+                                },
+                            ]
+                        }
+                    }
+                },
+            )
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post("http://192.168.1.100/graphql", callback=capture)
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                result = await client.typed_get_containers()
+
+        assert len(result) == 1
+        assert isinstance(result[0], DockerContainer)
+
+        # Query shape: extended query must actually ask the server for these fields.
+        assert captured_requests, "no GraphQL request was captured"
+        query = captured_requests[0]
+        assert "labels" in query
+        assert "networkSettings" in query
+        assert "mounts" in query
+
+        # Result shape: parsed model must surface the server data.
+        container = result[0]
+        assert container.labels == payload_labels
+        assert container.networkSettings == payload_network_settings
+        assert container.mounts == payload_mounts
 
 
 class TestTypedGetVmsMethod:
@@ -4937,7 +5161,10 @@ class TestGetTemperatureMetricsMethod:
                 assert isinstance(result, TemperatureMetrics)
                 assert result.id == "temp:1"
                 assert result.summary is not None
-                assert result.summary.average == 35.0
+                # Summary is recomputed from visible sensors (one disk @ 30 °C).
+                assert result.summary.average == 30.0
+                assert result.summary.hottest is not None
+                assert result.summary.hottest.name == "ST8000VN004"
                 assert len(result.sensors) == 1
                 assert result.sensors[0].name == "ST8000VN004"
                 assert result.sensors[0].temperature == 30.0
@@ -5183,3 +5410,604 @@ class TestTypedGetSharesCommentField:
                 assert len(result) == 1
                 assert isinstance(result[0], Share)
                 assert result[0].comment == "Application data storage"
+
+
+class TestNetworkQuery:
+    """Tests for get_network / typed_get_network."""
+
+    async def test_get_network_returns_raw_dict(self) -> None:
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "network": {
+                            "id": "network:default",
+                            "accessUrls": [
+                                {
+                                    "type": "LAN",
+                                    "name": "Tower",
+                                    "ipv4": "http://192.168.1.10",
+                                    "ipv6": None,
+                                }
+                            ],
+                        }
+                    }
+                },
+            )
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                result = await client.get_network()
+                assert result["id"] == "network:default"
+                assert len(result["accessUrls"]) == 1
+                assert result["accessUrls"][0]["type"] == "LAN"
+
+    async def test_typed_get_network_returns_model(self) -> None:
+        from unraid_api.models import Network
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "network": {
+                            "id": "network:default",
+                            "accessUrls": [
+                                {
+                                    "type": "LAN",
+                                    "name": "Tower",
+                                    "ipv4": "http://192.168.1.10",
+                                    "ipv6": None,
+                                },
+                                {
+                                    "type": "WAN",
+                                    "name": None,
+                                    "ipv4": "https://remote.example.com",
+                                    "ipv6": None,
+                                },
+                            ],
+                        }
+                    }
+                },
+            )
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                net = await client.typed_get_network()
+                assert isinstance(net, Network)
+                assert net.id == "network:default"
+                assert net.accessUrls is not None
+                assert len(net.accessUrls) == 2
+                assert net.accessUrls[0].type == "LAN"
+                assert net.accessUrls[1].type == "WAN"
+                assert net.accessUrls[1].ipv4 == "https://remote.example.com"
+
+
+class TestCreateNotificationMutation:
+    """Tests for createNotification / notifyIfUnique mutations."""
+
+    async def test_create_notification_full_fields(self) -> None:
+        from unraid_api.models import Notification
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "createNotification": {
+                            "id": "notification:123",
+                            "title": "HA Test",
+                            "subject": "Ping",
+                            "description": "Hello from Home Assistant",
+                            "importance": "INFO",
+                            "link": "https://ha.example.com",
+                            "type": "UNREAD",
+                            "timestamp": "2026-04-11T10:00:00Z",
+                            "formattedTimestamp": "Apr 11 10:00",
+                        }
+                    }
+                },
+            )
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                result = await client.create_notification(
+                    title="HA Test",
+                    subject="Ping",
+                    description="Hello from Home Assistant",
+                    importance="INFO",
+                    link="https://ha.example.com",
+                )
+                assert isinstance(result, Notification)
+                assert result.id == "notification:123"
+                assert result.title == "HA Test"
+                assert result.importance == "INFO"
+                assert result.link == "https://ha.example.com"
+
+    async def test_create_notification_without_link(self) -> None:
+        from unraid_api.models import Notification
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "createNotification": {
+                            "id": "notification:456",
+                            "title": "Warning",
+                            "subject": "Disk",
+                            "description": "Disk 2 warning",
+                            "importance": "WARNING",
+                            "link": None,
+                            "type": "UNREAD",
+                            "timestamp": None,
+                            "formattedTimestamp": None,
+                        }
+                    }
+                },
+            )
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                result = await client.create_notification(
+                    title="Warning",
+                    subject="Disk",
+                    description="Disk 2 warning",
+                    importance="WARNING",
+                )
+                assert isinstance(result, Notification)
+                assert result.importance == "WARNING"
+                assert result.link is None
+
+    async def test_notify_if_unique_returns_model_on_new(self) -> None:
+        from unraid_api.models import Notification
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "notifyIfUnique": {
+                            "id": "notification:789",
+                            "title": "Unique",
+                            "subject": "Test",
+                            "description": "only once",
+                            "importance": "INFO",
+                            "link": None,
+                            "type": "UNREAD",
+                            "timestamp": None,
+                            "formattedTimestamp": None,
+                        }
+                    }
+                },
+            )
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                result = await client.notify_if_unique(
+                    title="Unique",
+                    subject="Test",
+                    description="only once",
+                    importance="INFO",
+                )
+                assert isinstance(result, Notification)
+                assert result.id == "notification:789"
+
+    async def test_notify_if_unique_returns_none_on_duplicate(self) -> None:
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={"data": {"notifyIfUnique": None}},
+            )
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                result = await client.notify_if_unique(
+                    title="Dup",
+                    subject="Test",
+                    description="already exists",
+                    importance="INFO",
+                )
+                assert result is None
+
+
+class TestUpdateTemperatureConfigMutation:
+    """Tests for updateTemperatureConfig mutation."""
+
+    async def test_update_temperature_config_passes_input(self) -> None:
+        captured: dict[str, object] = {}
+
+        async def capture(url, **kwargs):  # type: ignore[no-untyped-def]
+            from aioresponses.core import CallbackResult
+
+            body = kwargs.get("json") or {}
+            captured["body"] = body
+            return CallbackResult(
+                status=200,
+                payload={"data": {"updateTemperatureConfig": True}},
+            )
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post("http://192.168.1.100/graphql", callback=capture)
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                result = await client.update_temperature_config(
+                    enabled=True,
+                    polling_interval=60,
+                    default_unit="CELSIUS",
+                    thresholds={"cpu_warning": 70, "cpu_critical": 85},
+                )
+
+        assert result is True
+        body = captured["body"]
+        assert isinstance(body, dict)
+        variables = body["variables"]
+        assert isinstance(variables, dict)
+        assert variables["input"]["enabled"] is True
+        assert variables["input"]["polling_interval"] == 60
+        assert variables["input"]["default_unit"] == "CELSIUS"
+        assert variables["input"]["thresholds"]["cpu_warning"] == 70
+        assert variables["input"]["thresholds"]["cpu_critical"] == 85
+
+
+def _capabilities_payload(
+    *,
+    query_fields: list[str],
+    mutation_fields: list[str] | None = None,
+    subscription_fields: list[str] | None = None,
+    docker_container_fields: list[str] | None = None,
+    tailscale_fields: list[str] | None = None,
+) -> dict[str, object]:
+    """Build a minimal aliased __type introspection response."""
+
+    def type_entry(name: str, fields: list[str] | None) -> dict[str, object] | None:
+        if fields is None:
+            return None
+        return {"name": name, "fields": [{"name": f} for f in fields]}
+
+    return {
+        "data": {
+            "Query": type_entry("Query", query_fields),
+            "Mutation": type_entry("Mutation", mutation_fields or []),
+            "Subscription": type_entry("Subscription", subscription_fields or []),
+            "DockerContainer": type_entry("DockerContainer", docker_container_fields),
+            "TailscaleStatus": type_entry("TailscaleStatus", tailscale_fields),
+            "DockerNetwork": None,
+            "Notification": None,
+            "ParityCheck": None,
+            "UnraidArray": None,
+        }
+    }
+
+
+class TestCapabilitiesIntegration:
+    """Tests for UnraidClient.get_capabilities lazy introspection."""
+
+    async def test_get_capabilities_runs_introspection_once(self) -> None:
+        """Subsequent calls return the cached capabilities object."""
+        payload = _capabilities_payload(
+            query_fields=["array", "network", "docker"],
+            mutation_fields=["createNotification"],
+        )
+        with aioresponses() as m:
+            m.post("https://192.168.1.100/graphql", payload=payload)
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                client._resolved_url = "https://192.168.1.100/graphql"
+                caps_a = await client.get_capabilities()
+                caps_b = await client.get_capabilities()
+
+        assert caps_a is caps_b
+        assert caps_a.has("Query.network") is True
+        assert caps_a.has("Mutation.createNotification") is True
+        assert caps_a.is_permissive is False
+
+    async def test_get_capabilities_falls_back_to_permissive_on_error(self) -> None:
+        """Introspection failure returns permissive capabilities, not an error."""
+        with aioresponses() as m:
+            m.post(
+                "https://192.168.1.100/graphql",
+                payload={"errors": [{"message": "introspection disabled"}]},
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                client._resolved_url = "https://192.168.1.100/graphql"
+                caps = await client.get_capabilities()
+
+        assert caps.is_permissive is True
+        assert caps.has("Query.anything") is True
+
+    async def test_get_capabilities_propagates_auth_error(self) -> None:
+        """An auth failure during introspection should surface, not degrade."""
+        with aioresponses() as m:
+            m.post("https://192.168.1.100/graphql", status=401)
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                client._resolved_url = "https://192.168.1.100/graphql"
+                with pytest.raises(UnraidAuthenticationError):
+                    await client.get_capabilities()
+
+        assert client._capabilities is None
+
+
+class TestNewFeaturesCapabilityGating:
+    """New top-level features must raise clean errors on old servers."""
+
+    async def _client_with_missing(
+        self,
+        *,
+        queries: list[str] | None = None,
+        mutations: list[str] | None = None,
+        subscriptions: list[str] | None = None,
+    ) -> UnraidClient:
+        from unraid_api.capabilities import ServerCapabilities
+
+        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client._capabilities = ServerCapabilities.from_introspection_response(
+            _capabilities_payload(
+                query_fields=queries or [],
+                mutation_fields=mutations or [],
+                subscription_fields=subscriptions or [],
+            )["data"]
+        )
+        return client
+
+    async def test_get_network_errors_when_missing(self) -> None:
+        client = await self._client_with_missing(queries=["array"])
+        with pytest.raises(UnraidAPIError, match="network"):
+            await client.get_network()
+
+    async def test_typed_get_network_errors_when_missing(self) -> None:
+        client = await self._client_with_missing(queries=["array"])
+        with pytest.raises(UnraidAPIError, match="network"):
+            await client.typed_get_network()
+
+    async def test_create_notification_errors_when_missing(self) -> None:
+        client = await self._client_with_missing(mutations=["archiveAll"])
+        with pytest.raises(UnraidAPIError, match="createNotification"):
+            await client.create_notification(
+                title="t", subject="s", description="d", importance="INFO"
+            )
+
+    async def test_notify_if_unique_errors_when_missing(self) -> None:
+        client = await self._client_with_missing(mutations=["archiveAll"])
+        with pytest.raises(UnraidAPIError, match="notifyIfUnique"):
+            await client.notify_if_unique(
+                title="t", subject="s", description="d", importance="INFO"
+            )
+
+    async def test_update_temperature_config_errors_when_missing(self) -> None:
+        client = await self._client_with_missing(mutations=["archiveAll"])
+        with pytest.raises(UnraidAPIError, match="updateTemperatureConfig"):
+            await client.update_temperature_config(enabled=True)
+
+    async def test_subscribe_notification_added_errors_when_missing(self) -> None:
+        client = await self._client_with_missing(subscriptions=["arraySubscription"])
+        with pytest.raises(UnraidAPIError, match="notificationAdded"):
+            async for _ in client.subscribe_notification_added():
+                pass
+
+    async def test_subscribe_notifications_overview_errors_when_missing(self) -> None:
+        client = await self._client_with_missing(subscriptions=["arraySubscription"])
+        with pytest.raises(UnraidAPIError, match="notificationsOverview"):
+            async for _ in client.subscribe_notifications_overview():
+                pass
+
+    async def test_subscribe_warnings_and_alerts_errors_when_missing(self) -> None:
+        client = await self._client_with_missing(subscriptions=["arraySubscription"])
+        with pytest.raises(UnraidAPIError, match="notificationsWarningsAndAlerts"):
+            async for _ in client.subscribe_notifications_warnings_and_alerts():
+                pass
+
+    async def test_subscribe_parity_history_errors_when_missing(self) -> None:
+        client = await self._client_with_missing(subscriptions=["arraySubscription"])
+        with pytest.raises(UnraidAPIError, match="parityHistorySubscription"):
+            async for _ in client.subscribe_parity_history():
+                pass
+
+    async def test_permissive_does_not_block(self) -> None:
+        """Permissive capabilities (introspection failed) must not gate."""
+        from unraid_api.capabilities import ServerCapabilities
+
+        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client._capabilities = ServerCapabilities.permissive()
+        # _require_capability must be a no-op in permissive mode
+        client._require_capability("X", "Query.anything")
+
+
+class TestTypedGetContainersCapabilityGating:
+    """typed_get_containers composes its query from server capabilities."""
+
+    async def _run_with_schema(
+        self,
+        docker_container_fields: list[str],
+        tailscale_fields: list[str],
+        container_response: dict[str, object],
+    ) -> tuple[list[str], object]:
+        from aioresponses.core import CallbackResult
+
+        captured: dict[str, object] = {}
+
+        def capture(url: object, **kwargs: object) -> CallbackResult:
+            body = kwargs.get("json")
+            assert isinstance(body, dict)
+            query_text = body.get("query", "")
+            calls = captured.setdefault("queries", [])
+            assert isinstance(calls, list)
+            calls.append(query_text)
+            # First call is introspection, second is containers query
+            if len(calls) == 1:
+                return CallbackResult(
+                    payload=_capabilities_payload(
+                        query_fields=["docker"],
+                        docker_container_fields=docker_container_fields,
+                        tailscale_fields=tailscale_fields,
+                    )
+                )
+            return CallbackResult(
+                payload={"data": {"docker": {"containers": [container_response]}}}
+            )
+
+        with aioresponses() as m:
+            m.post("https://192.168.1.100/graphql", callback=capture, repeat=True)
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                client._resolved_url = "https://192.168.1.100/graphql"
+                containers = await client.typed_get_containers()
+
+        calls = captured.get("queries")
+        assert isinstance(calls, list)
+        return [c for c in calls if isinstance(c, str)], containers
+
+    async def test_old_server_omits_extended_fields(self) -> None:
+        """On an older server without extended fields, query omits them."""
+        core_fields = ["id", "names", "image", "state", "status", "autoStart", "ports"]
+        queries, containers = await self._run_with_schema(
+            docker_container_fields=core_fields,
+            tailscale_fields=[],
+            container_response={
+                "id": "abc",
+                "names": ["/foo"],
+                "image": "nginx",
+                "state": "RUNNING",
+                "status": "Up",
+                "autoStart": False,
+                "ports": [],
+            },
+        )
+
+        # Two POSTs — introspection + container query
+        assert len(queries) == 2
+        container_query = queries[1]
+        assert "labels" not in container_query
+        assert "networkSettings" not in container_query
+        assert "mounts" not in container_query
+        assert "isUpdateAvailable" not in container_query
+        assert "tailscaleStatus" not in container_query
+        assert "exitNodeStatus" not in container_query
+        assert len(containers) == 1
+
+    async def test_full_server_includes_all_fields(self) -> None:
+        """On a current server, query requests every extended field."""
+        full_container_fields = [
+            "id",
+            "names",
+            "image",
+            "imageId",
+            "state",
+            "status",
+            "autoStart",
+            "isUpdateAvailable",
+            "isOrphaned",
+            "webUiUrl",
+            "iconUrl",
+            "command",
+            "created",
+            "sizeRootFs",
+            "sizeRw",
+            "sizeLog",
+            "autoStartOrder",
+            "autoStartWait",
+            "shell",
+            "templatePath",
+            "projectUrl",
+            "registryUrl",
+            "supportUrl",
+            "tailscaleEnabled",
+            "tailscaleStatus",
+            "isRebuildReady",
+            "templatePorts",
+            "lanIpPorts",
+            "hostConfig",
+            "ports",
+            "labels",
+            "networkSettings",
+            "mounts",
+        ]
+        full_tailscale_fields = [
+            "hostname",
+            "dnsName",
+            "online",
+            "version",
+            "latestVersion",
+            "updateAvailable",
+            "relay",
+            "relayName",
+            "tailscaleIps",
+            "primaryRoutes",
+            "isExitNode",
+            "exitNodeStatus",
+            "webUiUrl",
+            "keyExpiry",
+            "keyExpiryDays",
+            "keyExpired",
+            "backendState",
+            "authUrl",
+        ]
+        queries, containers = await self._run_with_schema(
+            docker_container_fields=full_container_fields,
+            tailscale_fields=full_tailscale_fields,
+            container_response={
+                "id": "abc",
+                "names": ["/foo"],
+                "image": "nginx",
+                "state": "RUNNING",
+                "status": "Up",
+                "autoStart": False,
+                "ports": [],
+                "labels": {"io.foo": "bar"},
+                "networkSettings": None,
+                "mounts": None,
+                "isUpdateAvailable": False,
+                "tailscaleStatus": {"online": True, "version": "1.80.0"},
+            },
+        )
+
+        container_query = queries[1]
+        assert "labels" in container_query
+        assert "networkSettings" in container_query
+        assert "mounts" in container_query
+        assert "isUpdateAvailable" in container_query
+        assert "tailscaleStatus" in container_query
+        assert "exitNodeStatus" in container_query
+        assert "version" in container_query
+        assert len(containers) == 1

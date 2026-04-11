@@ -133,9 +133,12 @@ class TestSubscribeProtocol:
     @pytest.fixture
     def ws_client(self, host: str, api_key: str) -> UnraidClient:
         """Create a client with pre-resolved URL and mock session."""
+        from unraid_api.capabilities import ServerCapabilities
+
         session = MagicMock()
         client = UnraidClient(host, api_key, session=session)
         client._resolved_url = f"https://{host}/graphql"
+        client._capabilities = ServerCapabilities.permissive()
         return client
 
     async def test_subscribe_yields_next_payloads(
@@ -287,9 +290,12 @@ class TestSubscribeErrors:
     @pytest.fixture
     def ws_client(self, host: str, api_key: str) -> UnraidClient:
         """Create a client with pre-resolved URL and mock session."""
+        from unraid_api.capabilities import ServerCapabilities
+
         session = MagicMock()
         client = UnraidClient(host, api_key, session=session)
         client._resolved_url = f"https://{host}/graphql"
+        client._capabilities = ServerCapabilities.permissive()
         return client
 
     async def test_connection_timeout(self, ws_client: UnraidClient) -> None:
@@ -398,9 +404,12 @@ class TestTypedSubscriptions:
     @pytest.fixture
     def ws_client(self, host: str, api_key: str) -> UnraidClient:
         """Create a client with pre-resolved URL and mock session."""
+        from unraid_api.capabilities import ServerCapabilities
+
         session = MagicMock()
         client = UnraidClient(host, api_key, session=session)
         client._resolved_url = f"https://{host}/graphql"
+        client._capabilities = ServerCapabilities.permissive()
         return client
 
     async def test_subscribe_container_stats(self, ws_client: UnraidClient) -> None:
@@ -668,6 +677,190 @@ class TestTypedSubscriptions:
         assert isinstance(results[0], TemperatureMetrics)
         assert results[0].id == "temp:1"
         assert results[0].summary is not None
-        assert results[0].summary.average == 35.0
+        # Summary is recomputed from visible sensors (one disk @ 30 °C).
+        assert results[0].summary.average == 30.0
         assert len(results[0].sensors) == 1
         assert results[0].sensors[0].temperature == 30.0
+
+    async def test_subscribe_notification_added(self, ws_client: UnraidClient) -> None:
+        """subscribe_notification_added yields Notification models."""
+        from unraid_api.models import Notification
+
+        ack = _ws_text_msg({"type": "connection_ack"})
+        next_msg = _ws_text_msg(
+            {
+                "id": "test",
+                "type": "next",
+                "payload": {
+                    "data": {
+                        "notificationAdded": {
+                            "id": "notification:abc",
+                            "title": "Disk warning",
+                            "subject": "Disk 2",
+                            "description": "Temperature high",
+                            "importance": "WARNING",
+                            "link": None,
+                            "type": "UNREAD",
+                            "timestamp": "2026-04-11T10:00:00Z",
+                            "formattedTimestamp": "Apr 11 10:00",
+                        }
+                    }
+                },
+            }
+        )
+        complete = _ws_text_msg({"id": "test", "type": "complete"})
+
+        ws = MockWebSocket([ack, next_msg, complete])
+        ws_client._session.ws_connect = AsyncMock(return_value=ws)  # type: ignore[union-attr]
+
+        results: list[Notification] = []
+        async for notif in ws_client.subscribe_notification_added():
+            results.append(notif)
+
+        assert len(results) == 1
+        assert isinstance(results[0], Notification)
+        assert results[0].id == "notification:abc"
+        assert results[0].importance == "WARNING"
+
+    async def test_subscribe_notifications_overview(
+        self, ws_client: UnraidClient
+    ) -> None:
+        """subscribe_notifications_overview yields NotificationOverview models."""
+        from unraid_api.models import NotificationOverview
+
+        ack = _ws_text_msg({"type": "connection_ack"})
+        next_msg = _ws_text_msg(
+            {
+                "id": "test",
+                "type": "next",
+                "payload": {
+                    "data": {
+                        "notificationsOverview": {
+                            "unread": {
+                                "info": 0,
+                                "warning": 2,
+                                "alert": 1,
+                                "total": 3,
+                            },
+                            "archive": {
+                                "info": 10,
+                                "warning": 5,
+                                "alert": 0,
+                                "total": 15,
+                            },
+                        }
+                    }
+                },
+            }
+        )
+        complete = _ws_text_msg({"id": "test", "type": "complete"})
+
+        ws = MockWebSocket([ack, next_msg, complete])
+        ws_client._session.ws_connect = AsyncMock(return_value=ws)  # type: ignore[union-attr]
+
+        results: list[NotificationOverview] = []
+        async for ov in ws_client.subscribe_notifications_overview():
+            results.append(ov)
+
+        assert len(results) == 1
+        assert isinstance(results[0], NotificationOverview)
+        assert results[0].unread.total == 3
+        assert results[0].archive.total == 15
+
+    async def test_subscribe_notifications_warnings_and_alerts(
+        self, ws_client: UnraidClient
+    ) -> None:
+        """subscribe_notifications_warnings_and_alerts yields list[Notification]."""
+        from unraid_api.models import Notification
+
+        ack = _ws_text_msg({"type": "connection_ack"})
+        next_msg = _ws_text_msg(
+            {
+                "id": "test",
+                "type": "next",
+                "payload": {
+                    "data": {
+                        "notificationsWarningsAndAlerts": [
+                            {
+                                "id": "notification:w1",
+                                "title": "Disk",
+                                "subject": "Disk 2",
+                                "description": "Warning",
+                                "importance": "WARNING",
+                                "link": None,
+                                "type": "UNREAD",
+                                "timestamp": None,
+                                "formattedTimestamp": None,
+                            },
+                            {
+                                "id": "notification:a1",
+                                "title": "Array",
+                                "subject": "Array",
+                                "description": "Alert",
+                                "importance": "ALERT",
+                                "link": None,
+                                "type": "UNREAD",
+                                "timestamp": None,
+                                "formattedTimestamp": None,
+                            },
+                        ]
+                    }
+                },
+            }
+        )
+        complete = _ws_text_msg({"id": "test", "type": "complete"})
+
+        ws = MockWebSocket([ack, next_msg, complete])
+        ws_client._session.ws_connect = AsyncMock(return_value=ws)  # type: ignore[union-attr]
+
+        results: list[list[Notification]] = []
+        async for batch in ws_client.subscribe_notifications_warnings_and_alerts():
+            results.append(batch)
+
+        assert len(results) == 1
+        assert len(results[0]) == 2
+        assert all(isinstance(n, Notification) for n in results[0])
+        assert results[0][0].importance == "WARNING"
+        assert results[0][1].importance == "ALERT"
+
+    async def test_subscribe_parity_history(self, ws_client: UnraidClient) -> None:
+        """subscribe_parity_history yields ParityCheck models."""
+        from unraid_api.models import ParityCheck
+
+        ack = _ws_text_msg({"type": "connection_ack"})
+        next_msg = _ws_text_msg(
+            {
+                "id": "test",
+                "type": "next",
+                "payload": {
+                    "data": {
+                        "parityHistorySubscription": {
+                            "date": "2026-04-11T09:00:00Z",
+                            "duration": 1200,
+                            "speed": "150.5 MB/s",
+                            "status": "RUNNING",
+                            "errors": 0,
+                            "progress": 42,
+                            "correcting": True,
+                            "paused": False,
+                            "running": True,
+                        }
+                    }
+                },
+            }
+        )
+        complete = _ws_text_msg({"id": "test", "type": "complete"})
+
+        ws = MockWebSocket([ack, next_msg, complete])
+        ws_client._session.ws_connect = AsyncMock(return_value=ws)  # type: ignore[union-attr]
+
+        results: list[ParityCheck] = []
+        async for pc in ws_client.subscribe_parity_history():
+            results.append(pc)
+
+        assert len(results) == 1
+        assert isinstance(results[0], ParityCheck)
+        assert results[0].status == "RUNNING"
+        assert results[0].progress == 42
+        assert results[0].speed == "150.5 MB/s"
+        assert results[0].correcting is True

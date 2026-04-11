@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import math
+import re
 from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Any
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
 
 def _parse_datetime(value: str | datetime | None) -> datetime | None:
@@ -289,12 +290,101 @@ class TemperatureSummary(UnraidBaseModel):
     criticalCount: int | None = None
 
 
+# Plausible range for any real hardware temperature reading (°C).
+# CPUs thermal-throttle at ~100 °C, so any reading above that — and in
+# particular the 105-120 °C readings that nct6793 reports on unused
+# PECI/AUXTIN pins — are treated as disconnected-pin noise, not signal.
+_PLAUSIBLE_TEMP_MIN_C = -20.0
+_PLAUSIBLE_TEMP_MAX_C = 105.0
+
+# Voltage rails (e.g. "nct6793-isa-0290 in0") and fan tachometers
+# (e.g. "Array Fan", "fan5") are routinely mis-typed as temperature
+# sensors by the upstream Unraid API.
+_VOLTAGE_NAME_RE = re.compile(r"(?:^|[^A-Za-z])in\d+(?:$|[^A-Za-z])", re.IGNORECASE)
+_FAN_NAME_RE = re.compile(r"\bfan\d*\b", re.IGNORECASE)
+
+
+def _is_bogus_temperature_sensor(sensor: TemperatureSensor) -> bool:
+    """Return True if the sensor is clearly not a real temperature reading."""
+    haystack = f"{sensor.name or ''} {sensor.id or ''}"
+    if _VOLTAGE_NAME_RE.search(haystack):
+        return True
+    if _FAN_NAME_RE.search(haystack):
+        return True
+
+    reading = sensor.current
+    if reading is None or reading.value is None:
+        return False
+
+    value = reading.value
+    if not math.isfinite(value):
+        return True
+    return value < _PLAUSIBLE_TEMP_MIN_C or value > _PLAUSIBLE_TEMP_MAX_C
+
+
 class TemperatureMetrics(UnraidBaseModel):
-    """Temperature metrics container with summary and individual sensors."""
+    """Temperature metrics container with summary and individual sensors.
+
+    Bogus sensors (voltage rails, fan tachometers, disconnected PECI/TSI
+    pins) are filtered out after parsing, and the summary (average,
+    hottest, coolest, warning/critical counts) is recomputed from the
+    remaining valid sensors. This ensures consumers like the Home
+    Assistant integration never see nonsense values.
+    """
 
     id: str | None = None
     summary: TemperatureSummary | None = None
     sensors: list[TemperatureSensor] = []
+
+    @model_validator(mode="after")
+    def _sanitize_sensors_and_summary(self) -> TemperatureMetrics:
+        valid = [s for s in self.sensors if not _is_bogus_temperature_sensor(s)]
+        self.sensors = valid
+
+        readings: list[tuple[TemperatureSensor, float]] = [
+            (s, s.current.value)
+            for s in valid
+            if s.current is not None and s.current.value is not None
+        ]
+        if not readings:
+            self.summary = None
+            return self
+
+        values = [value for _, value in readings]
+        hottest_sensor, _ = max(readings, key=lambda item: item[1])
+        coolest_sensor, _ = min(readings, key=lambda item: item[1])
+
+        def _status(sensor: TemperatureSensor) -> str:
+            return str(sensor.current.status) if sensor.current else ""
+
+        warning_count = sum(
+            1 for s, _ in readings if _status(s) == TemperatureStatus.WARNING
+        )
+        critical_count = sum(
+            1 for s, _ in readings if _status(s) == TemperatureStatus.CRITICAL
+        )
+
+        def _summary_entry(sensor: TemperatureSensor) -> TemperatureSensorSummary:
+            current = sensor.current
+            reading = (
+                TemperatureReading(
+                    value=current.value,
+                    unit=current.unit,
+                    status=current.status,
+                )
+                if current is not None
+                else None
+            )
+            return TemperatureSensorSummary(name=sensor.name, current=reading)
+
+        self.summary = TemperatureSummary(
+            average=sum(values) / len(values),
+            hottest=_summary_entry(hottest_sensor),
+            coolest=_summary_entry(coolest_sensor),
+            warningCount=warning_count,
+            criticalCount=critical_count,
+        )
+        return self
 
     def get_sensors_by_type(
         self, sensor_type: SensorType | str
@@ -377,7 +467,10 @@ class ParityCheck(UnraidBaseModel):
     errors: int | None = None
     running: bool | None = None
     paused: bool | None = None
-    speed: int | None = None
+    correcting: bool | None = None
+    speed: str | None = None
+    date: ParsedDatetime = None
+    duration: int | None = None
     elapsed: int | None = None  # Elapsed time in seconds
     estimated: int | None = None  # Estimated time remaining
 
@@ -571,12 +664,34 @@ class ContainerHostConfig(UnraidBaseModel):
     networkMode: str | None = None
 
 
+class TailscaleExitNodeStatus(UnraidBaseModel):
+    """Tailscale exit-node status reported for a container."""
+
+    online: bool | None = None
+    tailscaleIps: list[str] | None = None
+
+
 class TailscaleStatus(UnraidBaseModel):
     """Tailscale status for a Docker container."""
 
     hostname: str | None = None
     dnsName: str | None = None
     online: bool | None = None
+    version: str | None = None
+    latestVersion: str | None = None
+    updateAvailable: bool | None = None
+    relay: str | None = None
+    relayName: str | None = None
+    tailscaleIps: list[str] | None = None
+    primaryRoutes: list[str] | None = None
+    isExitNode: bool | None = None
+    exitNodeStatus: TailscaleExitNodeStatus | None = None
+    webUiUrl: str | None = None
+    keyExpiry: ParsedDatetime = None
+    keyExpiryDays: int | None = None
+    keyExpired: bool | None = None
+    backendState: str | None = None
+    authUrl: str | None = None
 
 
 class ContainerTemplatePort(UnraidBaseModel):
@@ -915,6 +1030,22 @@ class NotificationOverview(UnraidBaseModel):
 
     unread: NotificationOverviewCounts = NotificationOverviewCounts()
     archive: NotificationOverviewCounts = NotificationOverviewCounts()
+
+
+class AccessUrl(UnraidBaseModel):
+    """Access URL for reaching the Unraid server."""
+
+    type: str | None = None
+    name: str | None = None
+    ipv4: str | None = None
+    ipv6: str | None = None
+
+
+class Network(UnraidBaseModel):
+    """Network configuration and access URLs."""
+
+    id: str | None = None
+    accessUrls: list[AccessUrl] | None = None
 
 
 # =============================================================================

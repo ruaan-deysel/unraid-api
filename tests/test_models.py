@@ -1987,18 +1987,53 @@ class TestTailscaleStatus:
     """Tests for TailscaleStatus model."""
 
     def test_tailscale_status_all_fields(self) -> None:
-        """Test TailscaleStatus with all fields."""
-        from unraid_api.models import TailscaleStatus
+        """TailscaleStatus must cover every field the schema exposes."""
+        from unraid_api.models import TailscaleExitNodeStatus, TailscaleStatus
 
         status = TailscaleStatus(
             hostname="my-container",
             dnsName="my-container.tail12345.ts.net.",
             online=True,
+            version="1.80.0",
+            latestVersion="1.82.5",
+            updateAvailable=True,
+            relay="sea",
+            relayName="Seattle",
+            tailscaleIps=["100.64.0.2", "fd7a:115c:a1e0::2"],
+            primaryRoutes=["10.0.0.0/24"],
+            isExitNode=False,
+            exitNodeStatus=TailscaleExitNodeStatus(
+                online=True,
+                tailscaleIps=["100.64.0.3"],
+            ),
+            webUiUrl="http://100.64.0.2:8080",
+            keyExpiry="2026-10-01T12:00:00Z",
+            keyExpiryDays=42,
+            keyExpired=False,
+            backendState="Running",
+            authUrl=None,
         )
 
         assert status.hostname == "my-container"
         assert status.dnsName == "my-container.tail12345.ts.net."
         assert status.online is True
+        assert status.version == "1.80.0"
+        assert status.latestVersion == "1.82.5"
+        assert status.updateAvailable is True
+        assert status.relay == "sea"
+        assert status.relayName == "Seattle"
+        assert status.tailscaleIps == ["100.64.0.2", "fd7a:115c:a1e0::2"]
+        assert status.primaryRoutes == ["10.0.0.0/24"]
+        assert status.isExitNode is False
+        assert status.exitNodeStatus is not None
+        assert status.exitNodeStatus.online is True
+        assert status.exitNodeStatus.tailscaleIps == ["100.64.0.3"]
+        assert status.webUiUrl == "http://100.64.0.2:8080"
+        assert status.keyExpiry == datetime(2026, 10, 1, 12, 0, 0, tzinfo=UTC)
+        assert status.keyExpiryDays == 42
+        assert status.keyExpired is False
+        assert status.backendState == "Running"
+        assert status.authUrl is None
 
     def test_tailscale_status_defaults(self) -> None:
         """Test TailscaleStatus with default (None) values."""
@@ -2009,6 +2044,34 @@ class TestTailscaleStatus:
         assert status.hostname is None
         assert status.dnsName is None
         assert status.online is None
+        assert status.version is None
+        assert status.latestVersion is None
+        assert status.updateAvailable is None
+        assert status.tailscaleIps is None
+        assert status.primaryRoutes is None
+        assert status.isExitNode is None
+        assert status.exitNodeStatus is None
+        assert status.keyExpiry is None
+        assert status.keyExpiryDays is None
+        assert status.keyExpired is None
+        assert status.backendState is None
+        assert status.authUrl is None
+
+    def test_tailscale_exit_node_status(self) -> None:
+        """TailscaleExitNodeStatus is the nested exit-node shape from the API."""
+        from unraid_api.models import TailscaleExitNodeStatus
+
+        exit_node = TailscaleExitNodeStatus(
+            online=True,
+            tailscaleIps=["100.64.0.99"],
+        )
+
+        assert exit_node.online is True
+        assert exit_node.tailscaleIps == ["100.64.0.99"]
+
+        empty = TailscaleExitNodeStatus()
+        assert empty.online is None
+        assert empty.tailscaleIps is None
 
 
 class TestContainerTemplatePort:
@@ -2942,8 +3005,14 @@ class TestTemperatureMetrics:
 
         assert metrics.id == "temp:1"
         assert metrics.summary is not None
-        assert metrics.summary.average == 35.0
+        # Summary is recomputed from the sensors: (55 + 30 + 35) / 3 = 40.0
+        assert metrics.summary.average == 40.0
         assert metrics.summary.warningCount == 0
+        assert metrics.summary.criticalCount == 0
+        assert metrics.summary.hottest is not None
+        assert metrics.summary.hottest.name == "CPU Package"
+        assert metrics.summary.coolest is not None
+        assert metrics.summary.coolest.name == "ST8000VN004"
         assert len(metrics.sensors) == 3
 
     def test_sensor_type_filtering(self) -> None:
@@ -3046,7 +3115,8 @@ class TestTemperatureMetrics:
         assert metrics.temperature.sensors[0].name == "ST8000VN004"
         assert metrics.temperature.sensors[0].temperature == 30.0
         assert metrics.temperature.summary is not None
-        assert metrics.temperature.summary.average == 40.0
+        # Summary is recomputed from the one visible sensor (30.0 °C).
+        assert metrics.temperature.summary.average == 30.0
 
     def test_temperature_missing_from_response(self) -> None:
         """Test SystemMetrics.from_response with no temperature data."""
@@ -3127,8 +3197,399 @@ class TestTemperatureMetrics:
         assert len(metrics.disk_sensors) == 1
         assert len(metrics.nvme_sensors) == 1
         assert metrics.summary is not None
+        # Summary recomputed from visible sensors: (30 + 29) / 2 = 29.5
+        assert metrics.summary.average == 29.5
+        assert metrics.summary.hottest is not None
+        assert metrics.summary.hottest.name == "ST8000VN004-2M2101"
+        assert metrics.summary.coolest is not None
+        assert metrics.summary.coolest.name == "SPCC M.2 PCIe SSD"
+
+
+class TestTemperatureBogusSensorFiltering:
+    """Bogus sensor filtering and summary recomputation.
+
+    The Unraid API occasionally surfaces voltage rails, fan tachometers,
+    and disconnected PECI/TSI pins inside its temperature metrics. These
+    must be filtered out so downstream consumers (like the Home Assistant
+    integration) never see nonsense values such as 3,892,313 °C or a
+    530,831 °C "average".
+    """
+
+    def _sensor(
+        self,
+        *,
+        id: str,
+        name: str | None = None,
+        value: float | None,
+        sensor_type: str = "CUSTOM",
+        status: str = "NORMAL",
+    ):
+        from unraid_api.models import TemperatureReading, TemperatureSensor
+
+        return TemperatureSensor(
+            id=id,
+            name=name,
+            type=sensor_type,
+            current=TemperatureReading(value=value, unit="CELSIUS", status=status),
+        )
+
+    def test_filters_voltage_rail_sensors(self) -> None:
+        """Sensors named like 'nct6793 in0' are voltage rails, not temps."""
+        from unraid_api.models import TemperatureMetrics
+
+        metrics = TemperatureMetrics(
+            sensors=[
+                self._sensor(
+                    id="nct6793-isa-0290:in0:in0_input",
+                    name="nct6793-isa-0290 in0",
+                    value=0.63,
+                ),
+                self._sensor(
+                    id="nct6793-isa-0290:in12:in12_input",
+                    name="nct6793-isa-0290 in12",
+                    value=1.83,
+                ),
+                self._sensor(
+                    id="cpu:0",
+                    name="CPU Package",
+                    value=45.0,
+                    sensor_type="CPU_PACKAGE",
+                ),
+            ],
+        )
+
+        assert len(metrics.sensors) == 1
+        assert metrics.sensors[0].id == "cpu:0"
+
+    def test_filters_fan_tachometer_sensors(self) -> None:
+        """Sensors named like 'Array Fan' report RPM, not temperature."""
+        from unraid_api.models import TemperatureMetrics
+
+        metrics = TemperatureMetrics(
+            sensors=[
+                self._sensor(
+                    id="nct6793-isa-0290:Array Fan:fan5_input",
+                    name="nct6793-isa-0290 Array Fan",
+                    value=1478.0,
+                    status="CRITICAL",
+                ),
+                self._sensor(
+                    id="disk:1",
+                    name="ST8000VN004",
+                    value=42.0,
+                    sensor_type="DISK",
+                ),
+            ],
+        )
+
+        assert len(metrics.sensors) == 1
+        assert metrics.sensors[0].id == "disk:1"
+
+    def test_filters_out_of_range_values(self) -> None:
+        """Values far outside the plausible temperature range are bogus."""
+        from unraid_api.models import TemperatureMetrics
+
+        metrics = TemperatureMetrics(
+            sensors=[
+                self._sensor(
+                    id="nct6793:TSI7_TEMP:temp20_input",
+                    name="nct6793-isa-0290 TSI7_TEMP",
+                    value=3892313.99,
+                    status="CRITICAL",
+                ),
+                self._sensor(
+                    id="nct6793:SYSTIN:temp1_input",
+                    name="nct6793-isa-0290 SYSTIN",
+                    value=115.0,
+                    status="CRITICAL",
+                ),
+                self._sensor(
+                    id="nct6793:AUXTIN1:temp4_input",
+                    name="nct6793-isa-0290 AUXTIN1",
+                    value=108.0,
+                    status="CRITICAL",
+                ),
+                self._sensor(
+                    id="cpu:0",
+                    name="CPU Package",
+                    value=55.0,
+                    sensor_type="CPU_PACKAGE",
+                ),
+            ],
+        )
+
+        kept_ids = {s.id for s in metrics.sensors}
+        assert kept_ids == {"cpu:0"}
+
+    def test_filters_non_finite_values(self) -> None:
+        """NaN and infinity are never plausible temperature readings."""
+        from unraid_api.models import TemperatureMetrics
+
+        metrics = TemperatureMetrics(
+            sensors=[
+                self._sensor(id="bad:nan", name="bad nan", value=float("nan")),
+                self._sensor(id="bad:inf", name="bad inf", value=float("inf")),
+                self._sensor(
+                    id="cpu:0",
+                    name="CPU Package",
+                    value=50.0,
+                    sensor_type="CPU_PACKAGE",
+                ),
+            ],
+        )
+
+        assert [s.id for s in metrics.sensors] == ["cpu:0"]
+
+    def test_keeps_sensor_with_missing_current(self) -> None:
+        """Sensors with no current reading are not filtered as bogus."""
+        from unraid_api.models import TemperatureMetrics, TemperatureSensor
+
+        metrics = TemperatureMetrics(
+            sensors=[
+                TemperatureSensor(id="disk:standby", name="Sleeping disk"),
+                self._sensor(
+                    id="cpu:0",
+                    name="CPU Package",
+                    value=50.0,
+                    sensor_type="CPU_PACKAGE",
+                ),
+            ],
+        )
+
+        kept_ids = {s.id for s in metrics.sensors}
+        assert kept_ids == {"disk:standby", "cpu:0"}
+
+    def test_summary_recomputed_after_filtering(self) -> None:
+        """Server-provided bogus summary must be replaced with accurate values."""
+        from unraid_api.models import (
+            TemperatureMetrics,
+            TemperatureReading,
+            TemperatureSensorSummary,
+            TemperatureSummary,
+        )
+
+        metrics = TemperatureMetrics(
+            summary=TemperatureSummary(
+                average=530831.433409091,
+                hottest=TemperatureSensorSummary(
+                    name="nct6793-isa-0290 TSI7_TEMP",
+                    current=TemperatureReading(value=3892313.99, unit="CELSIUS"),
+                ),
+                coolest=TemperatureSensorSummary(
+                    name="nct6793-isa-0290 in11",
+                    current=TemperatureReading(value=0.14, unit="CELSIUS"),
+                ),
+                warningCount=1,
+                criticalCount=11,
+            ),
+            sensors=[
+                self._sensor(
+                    id="nct6793:in0:in0_input",
+                    name="nct6793-isa-0290 in0",
+                    value=0.63,
+                ),
+                self._sensor(
+                    id="nct6793:TSI7_TEMP:temp20_input",
+                    name="nct6793-isa-0290 TSI7_TEMP",
+                    value=3892313.99,
+                    status="CRITICAL",
+                ),
+                self._sensor(
+                    id="cpu:0",
+                    name="CPU Package",
+                    value=50.0,
+                    sensor_type="CPU_PACKAGE",
+                ),
+                self._sensor(
+                    id="disk:1",
+                    name="Array disk",
+                    value=40.0,
+                    sensor_type="DISK",
+                ),
+                self._sensor(
+                    id="disk:2",
+                    name="Cache SSD",
+                    value=30.0,
+                    sensor_type="NVME",
+                    status="WARNING",
+                ),
+            ],
+        )
+
+        assert len(metrics.sensors) == 3
+        assert metrics.summary is not None
+        assert metrics.summary.average == 40.0
         assert metrics.summary.hottest is not None
         assert metrics.summary.hottest.name == "CPU Package"
+        assert metrics.summary.hottest.current is not None
+        assert metrics.summary.hottest.current.value == 50.0
+        assert metrics.summary.coolest is not None
+        assert metrics.summary.coolest.name == "Cache SSD"
+        assert metrics.summary.coolest.current is not None
+        assert metrics.summary.coolest.current.value == 30.0
+        assert metrics.summary.warningCount == 1
+        assert metrics.summary.criticalCount == 0
+
+    def test_summary_none_when_no_valid_sensors(self) -> None:
+        """If every sensor is bogus, summary collapses to None."""
+        from unraid_api.models import TemperatureMetrics
+
+        metrics = TemperatureMetrics(
+            sensors=[
+                self._sensor(
+                    id="nct6793:in0:in0_input",
+                    name="nct6793-isa-0290 in0",
+                    value=0.5,
+                ),
+                self._sensor(
+                    id="nct6793:TSI7_TEMP:temp20_input",
+                    name="nct6793-isa-0290 TSI7_TEMP",
+                    value=3892313.99,
+                ),
+            ],
+        )
+
+        assert metrics.sensors == []
+        assert metrics.summary is None
+
+    def test_realistic_live_response_filters_all_bogus(self) -> None:
+        """End-to-end: the exact shape of the broken live response."""
+        from unraid_api.models import TemperatureMetrics
+
+        data = {
+            "summary": {
+                "average": 530831.433409091,
+                "hottest": {
+                    "name": "nct6793-isa-0290 TSI7_TEMP",
+                    "current": {"value": 3892313.99, "unit": "CELSIUS"},
+                },
+                "coolest": {
+                    "name": "nct6793-isa-0290 in11",
+                    "current": {"value": 0.14, "unit": "CELSIUS"},
+                },
+                "warningCount": 1,
+                "criticalCount": 11,
+            },
+            "sensors": [
+                # Voltage rails
+                *[
+                    {
+                        "id": f"nct6793-isa-0290:in{i}:in{i}_input",
+                        "name": f"nct6793-isa-0290 in{i}",
+                        "type": "CUSTOM",
+                        "current": {
+                            "value": v,
+                            "unit": "CELSIUS",
+                            "status": "NORMAL",
+                        },
+                    }
+                    for i, v in enumerate(
+                        [
+                            0.63,
+                            1.83,
+                            3.44,
+                            3.42,
+                            0.26,
+                            0.14,
+                            0.8,
+                            3.42,
+                            3.26,
+                            1.12,
+                            0.16,
+                            0.14,
+                            1.83,
+                            1.64,
+                            0.19,
+                        ]
+                    )
+                ],
+                # Fan tachometer
+                {
+                    "id": "nct6793-isa-0290:Array Fan:fan5_input",
+                    "name": "nct6793-isa-0290 Array Fan",
+                    "type": "CUSTOM",
+                    "current": {
+                        "value": 1478.0,
+                        "unit": "CELSIUS",
+                        "status": "CRITICAL",
+                    },
+                },
+                # Disconnected motherboard temps
+                {
+                    "id": "nct6793-isa-0290:SYSTIN:temp1_input",
+                    "name": "nct6793-isa-0290 SYSTIN",
+                    "type": "CUSTOM",
+                    "current": {
+                        "value": 115.0,
+                        "unit": "CELSIUS",
+                        "status": "CRITICAL",
+                    },
+                },
+                # Bogus PECI/TSI garbage
+                *[
+                    {
+                        "id": f"nct6793-isa-0290:TSI{i}_TEMP:temp{i}_input",
+                        "name": f"nct6793-isa-0290 TSI{i}_TEMP",
+                        "type": "CUSTOM",
+                        "current": {
+                            "value": 3892313.99,
+                            "unit": "CELSIUS",
+                            "status": "CRITICAL",
+                        },
+                    }
+                    for i in range(2, 8)
+                ],
+                # Real sensors
+                {
+                    "id": "coretemp-isa-0000:Core 0:temp2_input",
+                    "name": "coretemp-isa-0000 Core 0",
+                    "type": "CPU_CORE",
+                    "current": {
+                        "value": 41.0,
+                        "unit": "CELSIUS",
+                        "status": "NORMAL",
+                    },
+                },
+                {
+                    "id": "nvme-pci-0100:Composite:temp1_input",
+                    "name": "nvme-pci-0100 Composite",
+                    "type": "NVME",
+                    "current": {
+                        "value": 30.0,
+                        "unit": "CELSIUS",
+                        "status": "NORMAL",
+                    },
+                },
+                {
+                    "id": "disk:WKD07FR0",
+                    "name": "ST8000VN004-2M2101",
+                    "type": "DISK",
+                    "current": {
+                        "value": 42.0,
+                        "unit": "CELSIUS",
+                        "status": "NORMAL",
+                    },
+                },
+            ],
+        }
+
+        metrics = TemperatureMetrics(**data)
+
+        kept_names = {s.name for s in metrics.sensors}
+        assert kept_names == {
+            "coretemp-isa-0000 Core 0",
+            "nvme-pci-0100 Composite",
+            "ST8000VN004-2M2101",
+        }
+        assert metrics.summary is not None
+        assert metrics.summary.average is not None
+        assert 30.0 <= metrics.summary.average <= 50.0
+        assert metrics.summary.hottest is not None
+        assert metrics.summary.hottest.name == "ST8000VN004-2M2101"
+        assert metrics.summary.coolest is not None
+        assert metrics.summary.coolest.name == "nvme-pci-0100 Composite"
+        assert metrics.summary.warningCount == 0
+        assert metrics.summary.criticalCount == 0
 
 
 # =============================================================================
@@ -3307,3 +3768,79 @@ class TestExportedModels:
 
         c = NotificationOverviewCounts(info=5, warning=2, alert=1, total=8)
         assert c.total == 8
+
+
+class TestNetworkModels:
+    """Network and AccessUrl models reflect the Unraid GraphQL schema."""
+
+    def test_access_url_populates_all_fields(self) -> None:
+        from unraid_api.models import AccessUrl
+
+        url = AccessUrl(
+            type="LAN",
+            name="Tower",
+            ipv4="http://192.168.1.10",
+            ipv6="http://[fd00::1]",
+        )
+        assert url.type == "LAN"
+        assert url.name == "Tower"
+        assert url.ipv4 == "http://192.168.1.10"
+        assert url.ipv6 == "http://[fd00::1]"
+
+    def test_network_parses_nested_access_urls(self) -> None:
+        from unraid_api.models import Network
+
+        net = Network(
+            id="network:default",
+            accessUrls=[
+                {
+                    "type": "LAN",
+                    "name": "Tower",
+                    "ipv4": "http://192.168.1.10",
+                    "ipv6": None,
+                },
+                {
+                    "type": "WAN",
+                    "name": None,
+                    "ipv4": "https://remote.example.com",
+                    "ipv6": None,
+                },
+            ],
+        )
+        assert net.id == "network:default"
+        assert net.accessUrls is not None
+        assert len(net.accessUrls) == 2
+        assert net.accessUrls[0].type == "LAN"
+        assert net.accessUrls[1].ipv4 == "https://remote.example.com"
+
+    def test_network_and_access_url_exported(self) -> None:
+        from unraid_api import AccessUrl, Network
+
+        assert Network is not None
+        assert AccessUrl is not None
+
+
+class TestParityCheckSubscriptionFields:
+    """ParityCheck model must carry all fields returned by parityHistorySubscription."""
+
+    def test_parity_check_accepts_subscription_payload(self) -> None:
+        """Validate a payload shaped like parityHistorySubscription output."""
+        from unraid_api.models import ParityCheck
+
+        pc = ParityCheck(
+            date="2026-04-11T09:00:00Z",
+            duration=3600,
+            speed="150.5 MB/s",
+            status="RUNNING",
+            errors=0,
+            progress=42,
+            correcting=True,
+            paused=False,
+            running=True,
+        )
+        assert pc.status == "RUNNING"
+        assert pc.progress == 42
+        assert pc.speed == "150.5 MB/s"
+        assert pc.duration == 3600
+        assert pc.correcting is True
+        assert pc.date == datetime(2026, 4, 11, 9, 0, 0, tzinfo=UTC)
