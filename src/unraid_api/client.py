@@ -385,7 +385,7 @@ class UnraidClient:
             _LOGGER.debug(
                 "http_port == https_port (%d), assuming HTTPS for %s",
                 self.http_port,
-                self._sanitize_host_for_log(),
+                "<configured-host>",
             )
             return (None, True)
 
