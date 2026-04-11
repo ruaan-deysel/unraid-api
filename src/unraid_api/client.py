@@ -166,9 +166,8 @@ class UnraidClient:
         if not self.verify_ssl:
             ssl_context = False
             _LOGGER.warning(
-                "SSL verification disabled for %s. "
+                "SSL verification disabled. "
                 "Connection is encrypted but server identity is not verified.",
-                self._sanitize_host_for_log(),
             )
         else:
             ssl_context = True
