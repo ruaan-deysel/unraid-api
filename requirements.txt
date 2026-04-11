@@ -1,0 +1,39 @@
+aiohappyeyeballs==2.6.1
+    # via aiohttp
+aiohttp==3.13.5
+    # via unraid-api (pyproject.toml)
+aiosignal==1.4.0
+    # via aiohttp
+annotated-types==0.7.0
+    # via pydantic
+attrs==26.1.0
+    # via aiohttp
+frozenlist==1.8.0
+    # via
+    #   aiohttp
+    #   aiosignal
+idna==3.11
+    # via yarl
+multidict==6.7.1
+    # via
+    #   aiohttp
+    #   yarl
+packaging==26.0
+    # via unraid-api (pyproject.toml)
+propcache==0.4.1
+    # via
+    #   aiohttp
+    #   yarl
+pydantic==2.12.5
+    # via unraid-api (pyproject.toml)
+pydantic-core==2.41.5
+    # via pydantic
+typing-extensions==4.15.0
+    # via
+    #   pydantic
+    #   pydantic-core
+    #   typing-inspection
+typing-inspection==0.4.2
+    # via pydantic
+yarl==1.23.0
+    # via aiohttp

@@ -78,3 +78,7 @@ dmypy.json
 
 # Claude
 .claude/
+
+# CodeQL
+codeql-db/
+codeql-results.sarif

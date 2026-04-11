@@ -255,10 +255,12 @@ class UnraidClient:
             return "<redacted-host>"
 
         # Keep letters, digits, dot, dash, colon and brackets (for IPv6).
-        safe_chars = set("abcdefghijklmnopqrstuvwxyz"
-                         "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                         "0123456789"
-                         ".:-[]")
+        safe_chars = set(
+            "abcdefghijklmnopqrstuvwxyz"
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            "0123456789"
+            ".:-[]"
+        )
         safe_count = sum(1 for ch in host if ch in safe_chars)
         # If fewer than 70% of characters are "host-like", assume it may be a secret.
         if safe_count == 0 or safe_count / len(host) < 0.7:
@@ -319,9 +321,7 @@ class UnraidClient:
 
         # Reject unreasonably long hostnames
         if len(host) > 255:
-            raise UnraidConnectionError(
-                "Host exceeds maximum length of 255 characters"
-            )
+            raise UnraidConnectionError("Host exceeds maximum length of 255 characters")
 
         return host
 
@@ -741,7 +741,8 @@ class UnraidClient:
         headers: dict[str, str],
     ) -> aiohttp.ClientWebSocketResponse:
         """Open a WebSocket and perform the graphql-transport-ws handshake."""
-        assert self._session is not None  # noqa: S101
+        if self._session is None:
+            raise UnraidConnectionError("Session not initialized")
         try:
             ws = await self._session.ws_connect(
                 ws_url,
@@ -2296,27 +2297,45 @@ class UnraidClient:
             isSpinning status) without forcing disks to wake up.
 
         """
-        # Build query with optional SMART fields
-        smart_fields = "smartStatus" if include_smart else ""
-        query_str = f"""
-            query {{
-                disks {{
-                    id
-                    device
-                    name
-                    vendor
-                    size
-                    type
-                    interfaceType
-                    temperature
-                    isSpinning
-                    serialNum
-                    firmwareRevision
-                    partitions {{ name fsType size }}
-                    {smart_fields}
-                }}
-            }}
-        """
+        if include_smart:
+            query_str = """
+                query {
+                    disks {
+                        id
+                        device
+                        name
+                        vendor
+                        size
+                        type
+                        interfaceType
+                        temperature
+                        isSpinning
+                        serialNum
+                        firmwareRevision
+                        partitions { name fsType size }
+                        smartStatus
+                    }
+                }
+            """
+        else:
+            query_str = """
+                query {
+                    disks {
+                        id
+                        device
+                        name
+                        vendor
+                        size
+                        type
+                        interfaceType
+                        temperature
+                        isSpinning
+                        serialNum
+                        firmwareRevision
+                        partitions { name fsType size }
+                    }
+                }
+            """
         result = await self.query(query_str)
         return list(result.get("disks", []))
 
@@ -3232,8 +3251,6 @@ class UnraidClient:
             UnraidAPIError: On GraphQL errors.
 
         """
-        import asyncio
-
         await self.stop_container(container_id)
         await asyncio.sleep(delay)
         return await self.start_container(container_id)

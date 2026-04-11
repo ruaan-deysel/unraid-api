@@ -11,13 +11,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Eliminated GraphQL injection vector in `get_physical_disks()`** — Replaced f-string interpolation in the GraphQL query with two static query strings, preventing any possibility of query manipulation via the `include_smart` parameter
+- **Replaced `assert` with explicit error handling in WebSocket handshake** — `_ws_connect_and_init()` now raises `UnraidConnectionError` instead of using `assert` for session validation, which could be stripped by Python's `-O` flag
 - **API key no longer sent during SSL discovery** — The HTTP redirect probe in `_discover_redirect_url()` no longer includes authentication headers, preventing API key exposure over plaintext HTTP connections during SSL auto-discovery
 
 ### Deprecated
 
 - **cloud/connect/remoteAccess methods** — `get_cloud()`, `typed_get_cloud()`, `get_connect()`, `typed_get_connect()`, `get_remote_access()`, and `typed_get_remote_access()` now emit `DeprecationWarning`. These query roots were removed from the live Unraid GraphQL API (v4.31.1) and may be re-added in a future release. Models (`Cloud`, `Connect`, `RemoteAccess`) are retained for backward compatibility.
 
+### Fixed
+
+- **Removed redundant `import asyncio`** — `restart_container()` had a local `import asyncio` shadowing the module-level import (flagged by CodeQL `py/repeated-import`)
+- **Fixed missing newline at end of file** — `client.py` now ends with a trailing newline per POSIX convention (ruff W292)
+
 ### Changed
+
+- **`.gitignore`** — Added `codeql-db/` and `codeql-results.sarif` to exclude local CodeQL artifacts from version control
 
 - **Schema alignment audit** — Comprehensive cross-reference of all models, queries, and exports against live Unraid server GraphQL schema
   - **VmDomain**: Removed 6 speculative fields (`memory`, `vcpu`, `autostart`, `cpuMode`, `iconUrl`, `primaryGpu`) that do not exist in the GraphQL schema
@@ -31,6 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Python 3.14 compatibility** — `enable_cleanup_closed` is only passed to `TCPConnector` on Python < 3.14 where it isn't a no-op
 
 ### Added
+
+- **Dependency lock file** — Added `requirements.txt` with pinned production dependencies (generated via `pip-compile`) for reproducible installs and supply-chain auditability
 
 - **Share.comment** field and query — `typed_get_shares()` and `Share` model now include the share `comment` field from the schema
 - **Notification query fields** — `get_notifications()` now fetches `link`, `type`, and `formattedTimestamp` (model already had these fields, query was missing them)
@@ -319,7 +330,10 @@ Return dict/list for flexible access:
 - `PhysicalDisk`
 - `Notification`, `NotificationOverview`
 
-[Unreleased]: https://github.com/ruaan-deysel/unraid-api/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/ruaan-deysel/unraid-api/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/ruaan-deysel/unraid-api/compare/v1.7.1...v1.8.0
+[1.7.1]: https://github.com/ruaan-deysel/unraid-api/compare/v1.7.0...v1.7.1
+[1.7.0]: https://github.com/ruaan-deysel/unraid-api/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/ruaan-deysel/unraid-api/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/ruaan-deysel/unraid-api/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/ruaan-deysel/unraid-api/compare/v1.3.1...v1.4.0
