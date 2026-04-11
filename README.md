@@ -1,6 +1,5 @@
 # unraid-api
 
-[![CI](https://github.com/ruaan-deysel/unraid-api/actions/workflows/ci.yml/badge.svg)](https://github.com/ruaan-deysel/unraid-api/actions/workflows/ci.yml)
 [![PyPI version](https://badge.fury.io/py/unraid-api.svg)](https://badge.fury.io/py/unraid-api)
 [![Python versions](https://img.shields.io/pypi/pyversions/unraid-api.svg)](https://pypi.org/project/unraid-api/)
 [![Coverage](https://codecov.io/gh/ruaan-deysel/unraid-api/branch/main/graph/badge.svg)](https://codecov.io/gh/ruaan-deysel/unraid-api)
