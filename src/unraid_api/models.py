@@ -817,7 +817,7 @@ class DockerContainer(UnraidBaseModel):
             sizeLog=data.get("sizeLog"),
             autoStartOrder=data.get("autoStartOrder"),
             autoStartWait=data.get("autoStartWait"),
-            shell=data.get("shell"),
+            shell=data.get("shell"),  # nosec B604 - model field, not subprocess
             templatePath=data.get("templatePath"),
             projectUrl=data.get("projectUrl"),
             registryUrl=data.get("registryUrl"),
