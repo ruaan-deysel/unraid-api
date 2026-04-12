@@ -448,8 +448,9 @@ class UnraidClient:
                                 # Cannot extract configured hostname; reject redirect
                                 # to avoid bypassing the SSRF check.
                                 _LOGGER.warning(
-                                    "Could not extract hostname from configured host; "
-                                    "HTTPS redirect rejected."
+                                    "Could not extract hostname from %s; "
+                                    "HTTPS redirect rejected.",
+                                    self._sanitize_host_for_log(),
                                 )
                                 return (None, False)
                             if hostname and hostname != configured_hostname:
