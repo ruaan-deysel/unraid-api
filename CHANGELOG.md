@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-04-12
+
+### Security
+
+- **SSRF guard in SSL auto-discovery** — `_discover_redirect_url()` now validates that HTTPS redirects (Unraid "Yes" SSL mode) resolve to the same hostname as the configured server. Redirects to a different host are rejected with a warning, preventing a manipulated HTTP response from redirecting subsequent authenticated requests (including the API key) to an attacker-controlled HTTPS endpoint.
+- **Bounded response-body read for nginx 400 detection** — The 400-response body check that detects "plain HTTP to HTTPS port" errors previously read the full response body (`response.text()`). It now reads at most 512 bytes (`response.content.read(512)`), eliminating a potential unbounded-memory DoS vector from a malicious or misbehaving server.
+- **Dependabot enabled** — Added `.github/dependabot.yml` to automatically open pull requests when pip dependencies or GitHub Actions have new versions, keeping the supply chain up to date.
+- **OSV vulnerability scanner** — Added `.github/workflows/security.yml` that runs [google/osv-scanner](https://google.github.io/osv-scanner/) against `requirements.txt` on every push/PR and on a weekly schedule, uploading results to the GitHub Security tab as SARIF. The workflow also runs Bandit SAST to catch common Python security issues in source code.
+
 ## [1.9.0] - 2026-04-11
 
 ### Added

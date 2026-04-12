@@ -308,6 +308,46 @@ class TestRedirectDiscovery:
                 assert redirect_url is None
                 assert use_ssl is False
 
+    async def test_discover_https_redirect_to_different_host_rejected(self) -> None:
+        """SSRF guard: HTTPS redirect to a different hostname must be rejected.
+
+        A malicious or misconfigured server should not be able to redirect the
+        HTTP probe to an arbitrary HTTPS URL on a different host, which would
+        cause subsequent requests (including the API key) to be sent there.
+        """
+        with aioresponses() as m:
+            m.get(
+                "http://192.168.1.100/graphql",
+                status=302,
+                headers={"Location": "https://evil.example.com/graphql"},
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                redirect_url, use_ssl = await client._discover_redirect_url()
+
+                # Redirect to a different host must be silently rejected
+                assert redirect_url is None
+                assert use_ssl is False
+
+    async def test_discover_https_redirect_same_host_accepted(self) -> None:
+        """SSRF guard: HTTPS redirect to the same hostname must still work."""
+        with aioresponses() as m:
+            m.get(
+                "http://192.168.1.100/graphql",
+                status=302,
+                headers={"Location": "https://192.168.1.100/graphql"},
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                redirect_url, use_ssl = await client._discover_redirect_url()
+
+                assert redirect_url == "https://192.168.1.100/graphql"
+                assert use_ssl is True
+
     async def test_discover_without_session(self) -> None:
         """Test discovery creates session if none exists."""
         client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
