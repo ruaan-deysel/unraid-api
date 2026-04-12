@@ -15,30 +15,15 @@ permissions:
 jobs:
   osv-scan:
     name: OSV Vulnerability Scan
-    runs-on: ubuntu-latest
     permissions:
       contents: read
       security-events: write
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Run OSV Scanner
-        uses: google/osv-scanner-action@v2.3.5
-        with:
-          scan-args: |-
-            --lockfile=requirements.txt
-            --lockfile=pyproject.toml:pyproject.toml
-            --output=results.sarif
-            --format=sarif
-            .
-
-      - name: Upload SARIF results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: results.sarif
+      actions: read
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@v2.3.5
+    with:
+      scan-args: |-
+        --lockfile=requirements.txt
+        --lockfile=pyproject.toml:pyproject.toml
 
   bandit:
     name: Bandit SAST
