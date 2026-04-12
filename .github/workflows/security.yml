@@ -29,6 +29,7 @@ jobs:
         with:
           scan-args: |-
             --lockfile=requirements.txt
+            --lockfile=pyproject.toml:pyproject.toml
             --output=results.sarif
             --format=sarif
             .

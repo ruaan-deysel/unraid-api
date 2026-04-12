@@ -443,14 +443,19 @@ class UnraidClient:
                             # correctly — a plain split(":")[0] would break on
                             # bracketed IPv6 notation.
                             configured_parsed = urlparse(f"http://{request_host}")
-                            configured_hostname = (
-                                configured_parsed.hostname or request_host
-                            )
+                            configured_hostname = configured_parsed.hostname
+                            if not configured_hostname:
+                                # Cannot extract configured hostname; reject redirect
+                                # to avoid bypassing the SSRF check.
+                                _LOGGER.warning(
+                                    "Could not extract hostname from configured host; "
+                                    "HTTPS redirect rejected."
+                                )
+                                return (None, False)
                             if hostname and hostname != configured_hostname:
                                 _LOGGER.warning(
                                     "HTTPS redirect to different host rejected "
-                                    "(possible SSRF): configured=%s, redirect=%s",
-                                    clean_host,
+                                    "(possible SSRF): redirect=%s",
                                     self._sanitize_url(redirect_url),
                                 )
                                 return (None, False)
