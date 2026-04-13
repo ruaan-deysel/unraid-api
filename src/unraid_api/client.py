@@ -213,7 +213,7 @@ class UnraidClient:
                 _LOGGER.debug("Error closing session", exc_info=True)
             self._session = None
 
-    def _sanitize_host_for_log(self) -> str:  # noqa: PLR0911
+    def _sanitize_host_for_log(self) -> str:
         """Get a sanitized host string safe for logging (no credentials or secrets).
 
         This method is ONLY for logging purposes and may return placeholder strings
@@ -433,6 +433,33 @@ class UnraidClient:
 
                         # Check for HTTPS redirect (Yes mode)
                         if parsed.scheme == "https":
+                            # Security: only follow HTTPS redirects to the same
+                            # host as the configured server.  Redirects to a
+                            # different hostname are rejected to prevent SSRF
+                            # and API-key theft via redirect manipulation.
+                            #
+                            # Use urlparse to extract the bare hostname so that
+                            # IPv6 addresses (e.g. [::1]:8080) are handled
+                            # correctly — a plain split(":")[0] would break on
+                            # bracketed IPv6 notation.
+                            configured_parsed = urlparse(f"http://{request_host}")
+                            configured_hostname = configured_parsed.hostname
+                            if not configured_hostname:
+                                # Cannot extract configured hostname; reject redirect
+                                # to avoid bypassing the SSRF check.
+                                _LOGGER.warning(
+                                    "Could not extract hostname from %s; "
+                                    "HTTPS redirect rejected.",
+                                    self._sanitize_host_for_log(),
+                                )
+                                return (None, False)
+                            if hostname and hostname != configured_hostname:
+                                _LOGGER.warning(
+                                    "HTTPS redirect to different host rejected "
+                                    "(possible SSRF): redirect=%s",
+                                    self._sanitize_url(redirect_url),
+                                )
+                                return (None, False)
                             port = parsed.port
                             if port == DEFAULT_HTTPS_PORT:
                                 normalized = f"https://{hostname}{parsed.path}"
@@ -456,7 +483,10 @@ class UnraidClient:
 
                 # Detect nginx returning 400 when plain HTTP hits an HTTPS port
                 if response.status == 400:
-                    body = await response.text()
+                    # Read only enough bytes to detect the nginx message,
+                    # avoiding unbounded memory use on large error bodies.
+                    raw = await response.content.read(512)
+                    body = raw.decode("utf-8", errors="ignore")
                     if "the plain http request was sent to https port" in body.lower():
                         if self.http_port == DEFAULT_HTTPS_PORT:
                             https_url = f"https://{clean_host}/graphql"
@@ -499,7 +529,7 @@ class UnraidClient:
 
         return (None, True)
 
-    async def _make_request(self, payload: dict[str, Any]) -> dict[str, Any]:  # noqa: PLR0915
+    async def _make_request(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Make a GraphQL request to the Unraid server.
 
         Args:

@@ -1,0 +1,47 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Run every Monday at 06:00 UTC
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  osv-scan:
+    name: OSV Vulnerability Scan
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@v2.3.5
+    with:
+      scan-args: |-
+        --lockfile=requirements.txt
+        --lockfile=pyproject.toml:pyproject.toml
+
+  bandit:
+    name: Bandit SAST
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Bandit
+        run: pip install "bandit[toml]>=1.8"
+
+      - name: Run Bandit
+        run: bandit -c pyproject.toml -r src/unraid_api/ -ll
