@@ -10,26 +10,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Setup
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+uv sync --all-extras
 
 # Run all tests with coverage
-pytest tests/ -v --cov=src/unraid_api
+uv run pytest tests/ -v --cov=src/unraid_api
 
 # Run a single test file
-pytest tests/test_client.py -v
+uv run pytest tests/test_client.py -v
 
 # Run a single test
-pytest tests/test_client.py::TestClassName::test_method_name -v
+uv run pytest tests/test_client.py::TestClassName::test_method_name -v
 
 # Linting and formatting
-ruff check .
-ruff format .
-mypy src/
+uv run ruff check .
+uv run ruff format .
+uv run mypy src/
 
 # Pre-commit hooks (runs ruff, mypy, security checks)
-pre-commit run --all-files
+uv run pre-commit run --all-files
 ```
 
 ## Architecture

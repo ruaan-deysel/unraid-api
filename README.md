@@ -363,20 +363,16 @@ async with UnraidClient(host, api_key) as client:
 git clone https://github.com/ruaan-deysel/unraid-api.git
 cd unraid-api
 
-# Create virtual environment
-python -m venv .venv
-source .venv/bin/activate
-
-# Install with dev dependencies
-pip install -e ".[dev]"
+# Install dependencies with uv
+uv sync --all-extras
 
 # Run tests
-pytest tests/ -v --cov=src/unraid_api
+uv run pytest tests/ -v --cov=src/unraid_api
 
 # Lint and type check
-ruff check .
-ruff format .
-mypy src/
+uv run ruff check .
+uv run ruff format .
+uv run mypy src/
 ```
 
 ## License

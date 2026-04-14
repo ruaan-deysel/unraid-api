@@ -99,20 +99,16 @@ class TestClientInitialization:
 
 ### Setup
 ```bash
-# Create virtual environment
-python -m venv .venv
-source .venv/bin/activate
-
-# Install with dev dependencies
-pip install -e ".[dev]"
+# Install dependencies with uv
+uv sync --all-extras
 ```
 
 ### Pre-commit Checklist
 ```bash
-pytest tests/ -v --cov=src/unraid_api
-ruff check .
-ruff format .
-mypy src/
+uv run pytest tests/ -v --cov=src/unraid_api
+uv run ruff check .
+uv run ruff format .
+uv run mypy src/
 ```
 
 **Pre-commit MUST always be run before any commit.**
