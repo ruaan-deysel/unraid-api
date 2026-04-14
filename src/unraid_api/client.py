@@ -1155,6 +1155,43 @@ class UnraidClient:
         result = await self.query(query_str)
         return SystemMetrics.from_response(result)
 
+    async def get_system_metrics_safe(self) -> SystemMetrics:
+        """Get system metrics WITHOUT temperature sensors.
+
+        Identical to get_system_metrics() but omits the temperature block
+        from the GraphQL query. The Unraid GraphQL temperature resolver
+        triggers smartctl reads for disk sensors which wakes sleeping/standby
+        disks. Use this method for frequent polling (e.g. every 30 seconds)
+        to avoid disrupting disk power management.
+
+        CPU temperature is still available via info.cpu.packages.temp.
+        Temperature will be None in the returned SystemMetrics.
+
+        Returns:
+            SystemMetrics model with temperature=None.
+
+        """
+        from unraid_api.models import SystemMetrics
+
+        query_str = """
+            query {
+                metrics {
+                    cpu { percentTotal }
+                    memory {
+                        total used free available active buffcache
+                        percentTotal
+                        swapTotal swapUsed swapFree percentSwapTotal
+                    }
+                }
+                info {
+                    os { uptime }
+                    cpu { packages { temp totalPower } }
+                }
+            }
+        """
+        result = await self.query(query_str)
+        return SystemMetrics.from_response(result)
+
     async def get_temperature_metrics(self) -> TemperatureMetrics:
         """Get temperature metrics from all sensors.
 

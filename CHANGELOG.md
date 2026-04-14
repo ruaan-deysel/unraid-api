@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-04-15
+
+### Added
+
+- **`get_system_metrics_safe()` method** — Identical to `get_system_metrics()` but omits the `metrics.temperature` GraphQL block. The Unraid temperature resolver triggers smartctl reads that wake sleeping/standby disks; this method is safe for frequent polling (e.g. every 30 seconds) without disrupting disk power management. CPU temperature remains available via `info.cpu.packages.temp`. Returns `SystemMetrics` with `temperature=None`. ([#50](https://github.com/ruaan-deysel/unraid-api/issues/50))
+
 ## [1.9.1] - 2026-04-12
 
 ### Security

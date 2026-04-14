@@ -2347,6 +2347,95 @@ class TestGetSystemMetricsMethod:
                 assert result.uptime is None
 
 
+class TestGetSystemMetricsSafeMethod:
+    """Tests for get_system_metrics_safe method (omits temperature sensors)."""
+
+    async def test_get_system_metrics_safe(self) -> None:
+        """Test safe system metrics returns SystemMetrics without temperature."""
+        from unraid_api.models import SystemMetrics
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "metrics": {
+                            "cpu": {"percentTotal": 25.5},
+                            "memory": {
+                                "total": 34359738368,
+                                "used": 17179869184,
+                                "free": 17179869184,
+                                "available": 25769803776,
+                                "active": 8589934592,
+                                "buffcache": 4294967296,
+                                "percentTotal": 50.0,
+                                "swapTotal": 8589934592,
+                                "swapUsed": 0,
+                                "swapFree": 8589934592,
+                                "percentSwapTotal": 0.0,
+                            },
+                        },
+                        "info": {
+                            "os": {"uptime": "2024-01-15T10:30:00Z"},
+                            "cpu": {"packages": {"temp": [55.0], "totalPower": 65.0}},
+                        },
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_system_metrics_safe()
+
+                assert isinstance(result, SystemMetrics)
+                assert result.cpu_percent == 25.5
+                assert result.memory_percent == 50.0
+                assert result.memory_total == 34359738368
+                assert result.memory_used == 17179869184
+                assert result.memory_available == 25769803776
+                assert result.swap_percent == 0.0
+                assert result.swap_total == 8589934592
+                assert result.swap_used == 0
+                assert result.swap_free == 8589934592
+                assert result.temperature is None
+                assert result.cpu_temperature == 55.0
+                assert result.cpu_power == 65.0
+                assert result.uptime is not None
+
+    async def test_get_system_metrics_safe_minimal_response(self) -> None:
+        """Test safe system metrics with minimal response data."""
+        from unraid_api.models import SystemMetrics
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "metrics": {
+                            "cpu": {"percentTotal": 10.0},
+                            "memory": {"percentTotal": 30.0},
+                        },
+                        "info": {"os": {}},
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                result = await client.get_system_metrics_safe()
+
+                assert isinstance(result, SystemMetrics)
+                assert result.cpu_percent == 10.0
+                assert result.memory_percent == 30.0
+                assert result.temperature is None
+                assert result.cpu_temperature is None
+                assert result.uptime is None
+
+
 class TestTypedGetContainersMethod:
     """Tests for typed_get_containers method (returns list[DockerContainer])."""
 

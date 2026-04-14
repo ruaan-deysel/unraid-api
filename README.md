@@ -197,6 +197,7 @@ async with UnraidClient(host, api_key) as client:
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `get_system_metrics()` | `SystemMetrics` | CPU, memory, temperature, power, uptime |
+| `get_system_metrics_safe()` | `SystemMetrics` | Same as above but omits temperature sensors to avoid waking sleeping disks |
 | `typed_get_array()` | `UnraidArray` | Array state, capacity, disks |
 | `typed_get_containers()` | `list[DockerContainer]` | All Docker containers |
 | `typed_get_vms()` | `list[VmDomain]` | All virtual machines |
