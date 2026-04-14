@@ -117,7 +117,7 @@ class UnraidClient:
             session: Optional aiohttp session (for HA websession injection).
 
         """
-        self.host = host.strip()
+        self.host = self._strip_userinfo(host.strip())
         if not (1 <= http_port <= 65535):
             raise ValueError(f"http_port must be between 1 and 65535, got {http_port}")
         if not (1 <= https_port <= 65535):
@@ -212,6 +212,24 @@ class UnraidClient:
             except Exception:
                 _LOGGER.debug("Error closing session", exc_info=True)
             self._session = None
+
+    @staticmethod
+    def _strip_userinfo(host: str) -> str:
+        """Strip any embedded credentials (user:pass@) from the host value.
+
+        Ensures that self.host never carries sensitive userinfo, eliminating
+        the risk of logging credentials downstream.
+        """
+        if "://" in host:
+            parsed = urlparse(host)
+            if parsed.username or parsed.password:
+                netloc = parsed.hostname or ""
+                if parsed.port:
+                    netloc += f":{parsed.port}"
+                host = parsed._replace(netloc=netloc).geturl()
+        elif "@" in host:
+            host = host.split("@", 1)[1]
+        return host
 
     def _sanitize_host_for_log(self) -> str:
         """Get a sanitized host string safe for logging (no credentials or secrets).

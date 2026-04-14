@@ -134,6 +134,42 @@ class TestClientHostParsing:
         assert client._normalize_host_for_request() == "myserver.myunraid.net"
 
 
+class TestStripUserinfo:
+    """Tests for _strip_userinfo static method."""
+
+    def test_plain_host_unchanged(self, api_key: str) -> None:
+        """Test plain hostname passes through unchanged."""
+        client = UnraidClient("192.168.1.100", api_key)
+        assert client.host == "192.168.1.100"
+
+    def test_strips_userinfo_from_url(self, api_key: str) -> None:
+        """Test credentials are stripped from URL-style host."""
+        client = UnraidClient("http://admin:secret@192.168.1.100", api_key)
+        assert client.host == "http://192.168.1.100"
+        assert "admin" not in client.host
+        assert "secret" not in client.host
+
+    def test_strips_userinfo_from_https_url(self, api_key: str) -> None:
+        """Test credentials are stripped from HTTPS URL."""
+        client = UnraidClient("https://user:pass@myserver.local:8443", api_key)
+        assert client.host == "https://myserver.local:8443"
+
+    def test_strips_userinfo_from_bare_host(self, api_key: str) -> None:
+        """Test credentials are stripped from bare user@host format."""
+        client = UnraidClient("user:pass@192.168.1.100", api_key)
+        assert client.host == "192.168.1.100"
+
+    def test_preserves_port_in_url(self, api_key: str) -> None:
+        """Test port is preserved when stripping userinfo."""
+        client = UnraidClient("http://admin:pw@10.0.0.1:8080", api_key)
+        assert client.host == "http://10.0.0.1:8080"
+
+    def test_no_credentials_url_unchanged(self, api_key: str) -> None:
+        """Test URL without credentials passes through unchanged."""
+        client = UnraidClient("https://192.168.1.100:443", api_key)
+        assert client.host == "https://192.168.1.100:443"
+
+
 class TestClientSessionProperty:
     """Tests for session property."""
 
