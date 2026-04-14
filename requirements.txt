@@ -24,7 +24,7 @@ propcache==0.4.1
     # via
     #   aiohttp
     #   yarl
-pydantic==2.12.5
+pydantic==2.13.0
     # via unraid-api (pyproject.toml)
 pydantic-core==2.41.5
     # via pydantic
