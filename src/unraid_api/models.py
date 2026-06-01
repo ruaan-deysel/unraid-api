@@ -2001,3 +2001,95 @@ class ArraySubscriptionUpdate(UnraidBaseModel):
 
     state: str | None = None
     capacity: ArrayCapacity | None = None
+
+
+# =============================================================================
+# System Time Models (Unraid 7.3 / API 4.3x)
+# =============================================================================
+
+
+class SystemTime(UnraidBaseModel):
+    """Server system-time configuration.
+
+    Attributes:
+        currentTime: Current server time (ISO-8601 string).
+        ntpServers: Configured NTP servers (list of hostnames).
+        timeZone: IANA time-zone name (e.g., "Australia/Brisbane").
+        useNtp: Whether NTP time synchronization is enabled.
+
+    """
+
+    currentTime: str | None = None
+    ntpServers: list[str] | None = None
+    timeZone: str | None = None
+    useNtp: bool | None = None
+
+
+class TimeZoneOption(UnraidBaseModel):
+    """A selectable time-zone option.
+
+    Attributes:
+        label: Human-readable label.
+        value: IANA time-zone identifier.
+
+    """
+
+    label: str | None = None
+    value: str | None = None
+
+
+# =============================================================================
+# Settings Models (Unraid 7.3 / API 4.3x)
+# =============================================================================
+
+
+class ApiConfig(UnraidBaseModel):
+    """API configuration block from ``settings.api``.
+
+    Attributes:
+        version: Installed Unraid API version.
+        sandbox: Whether the GraphQL sandbox is enabled.
+        plugins: Installed API plugin identifiers.
+        extraOrigins: Additional allowed CORS origins.
+        ssoSubIds: Configured SSO subject identifiers.
+
+    """
+
+    version: str | None = None
+    sandbox: bool | None = None
+    plugins: list[str] | None = None
+    extraOrigins: list[str] | None = None
+    ssoSubIds: list[str] | None = None
+
+
+class UnifiedSettings(UnraidBaseModel):
+    """Unified settings form payload from ``settings.unified``.
+
+    The fields are JSON blobs (RJSF schema / values), exposed as-is for
+    diagnostics.
+
+    Attributes:
+        values: Current setting values.
+        dataSchema: JSON schema describing the settings.
+        uiSchema: UI schema for rendering the settings form.
+
+    """
+
+    values: dict[str, Any] | None = None
+    dataSchema: dict[str, Any] | None = None
+    uiSchema: dict[str, Any] | None = None
+
+
+class Settings(UnraidBaseModel):
+    """Server settings (read-only diagnostic view).
+
+    Attributes:
+        id: Settings identifier.
+        api: API configuration block.
+        unified: Unified settings form payload.
+
+    """
+
+    id: str | None = None
+    api: ApiConfig | None = None
+    unified: UnifiedSettings | None = None

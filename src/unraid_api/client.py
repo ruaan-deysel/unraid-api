@@ -50,14 +50,18 @@ if TYPE_CHECKING:
         Owner,
         ParityCheck,
         ParityHistoryEntry,
+        PhysicalDisk,
         Plugin,
         Registration,
         RemoteAccess,
         ServerInfo,
         Service,
+        Settings,
         Share,
         SystemMetrics,
+        SystemTime,
         TemperatureMetrics,
+        TimeZoneOption,
         UnraidArray,
         UPSConfiguration,
         UPSDevice,
@@ -4251,3 +4255,372 @@ class UnraidClient:
             input_data["history"] = history
         result = await self.mutate(mutation, {"input": input_data})
         return bool(result.get("updateTemperatureConfig", False))
+
+    # =========================================================================
+    # System Time Methods (Unraid 7.3 / API 4.3x)
+    # =========================================================================
+
+    async def get_system_time(self) -> SystemTime:
+        """Get server system-time configuration.
+
+        Returns:
+            SystemTime model with current time, NTP servers, time zone, and
+            whether NTP synchronization is enabled.
+
+        """
+        from unraid_api.models import SystemTime
+
+        await self.get_capabilities()
+        self._require_capability("System time query", "Query.systemTime")
+
+        query_str = """
+            query {
+                systemTime {
+                    currentTime
+                    ntpServers
+                    timeZone
+                    useNtp
+                }
+            }
+        """
+        result = await self.query(query_str)
+        return SystemTime(**(result.get("systemTime") or {}))
+
+    async def get_timezone_options(self) -> list[TimeZoneOption]:
+        """Get the list of selectable time-zone options.
+
+        Returns:
+            List of TimeZoneOption models (label/value pairs).
+
+        """
+        from unraid_api.models import TimeZoneOption
+
+        await self.get_capabilities()
+        self._require_capability("Time-zone options query", "Query.timeZoneOptions")
+
+        query_str = """
+            query {
+                timeZoneOptions {
+                    label
+                    value
+                }
+            }
+        """
+        result = await self.query(query_str)
+        options = result.get("timeZoneOptions") or []
+        return [TimeZoneOption(**o) for o in options]
+
+    async def update_system_time(
+        self,
+        *,
+        time_zone: str | None = None,
+        use_ntp: bool | None = None,
+        ntp_servers: list[str] | None = None,
+        manual_date_time: str | None = None,
+    ) -> SystemTime:
+        """Update server system-time configuration.
+
+        Only the provided arguments are sent to the server; omitted arguments
+        are left unchanged.
+
+        Args:
+            time_zone: IANA time-zone name (e.g., "Australia/Brisbane").
+            use_ntp: Enable or disable NTP time synchronization.
+            ntp_servers: List of NTP server hostnames.
+            manual_date_time: ISO-8601 timestamp to set when NTP is disabled.
+
+        Returns:
+            SystemTime model with the updated configuration.
+
+        """
+        from unraid_api.models import SystemTime
+
+        await self.get_capabilities()
+        self._require_capability(
+            "updateSystemTime mutation", "Mutation.updateSystemTime"
+        )
+
+        mutation = """
+            mutation UpdateSystemTime($input: UpdateSystemTimeInput!) {
+                updateSystemTime(input: $input) {
+                    currentTime
+                    ntpServers
+                    timeZone
+                    useNtp
+                }
+            }
+        """
+        input_data: dict[str, Any] = {}
+        if time_zone is not None:
+            input_data["timeZone"] = time_zone
+        if use_ntp is not None:
+            input_data["useNtp"] = use_ntp
+        if ntp_servers is not None:
+            input_data["ntpServers"] = ntp_servers
+        if manual_date_time is not None:
+            input_data["manualDateTime"] = manual_date_time
+        result = await self.mutate(mutation, {"input": input_data})
+        return SystemTime(**(result.get("updateSystemTime") or {}))
+
+    # =========================================================================
+    # Disk & UPS Extra Methods (Unraid 7.3 / API 4.3x)
+    # =========================================================================
+
+    async def get_assignable_disks(self) -> list[PhysicalDisk]:
+        """Get disks that can be assigned to the array.
+
+        WARNING: This queries the physical-disk endpoint and WILL WAKE
+        sleeping/standby disks. Use sparingly.
+
+        Returns:
+            List of PhysicalDisk models for unassigned/assignable disks.
+
+        """
+        from unraid_api.models import PhysicalDisk
+
+        await self.get_capabilities()
+        self._require_capability("Assignable disks query", "Query.assignableDisks")
+
+        query_str = """
+            query {
+                assignableDisks {
+                    id
+                    device
+                    name
+                    vendor
+                    size
+                    type
+                    interfaceType
+                    temperature
+                    isSpinning
+                    serialNum
+                    firmwareRevision
+                    partitions { name fsType size }
+                }
+            }
+        """
+        result = await self.query(query_str)
+        disks = result.get("assignableDisks") or []
+        return [PhysicalDisk(**d) for d in disks]
+
+    async def get_disk(self, disk_id: str) -> PhysicalDisk:
+        """Get a single physical disk by ID.
+
+        WARNING: This queries the physical-disk endpoint and WILL WAKE the
+        disk if it is sleeping. Use get_array_disks() for standby-safe status.
+
+        Args:
+            disk_id: Disk ID (PrefixedID, e.g., "disk:sda").
+
+        Returns:
+            PhysicalDisk model.
+
+        """
+        from unraid_api.models import PhysicalDisk
+
+        await self.get_capabilities()
+        self._require_capability("Disk query", "Query.disk")
+
+        query_str = """
+            query GetDisk($id: PrefixedID!) {
+                disk(id: $id) {
+                    id
+                    device
+                    name
+                    vendor
+                    size
+                    type
+                    interfaceType
+                    temperature
+                    isSpinning
+                    serialNum
+                    firmwareRevision
+                    smartStatus
+                    partitions { name fsType size }
+                }
+            }
+        """
+        result = await self.query(query_str, {"id": disk_id})
+        return PhysicalDisk(**(result.get("disk") or {}))
+
+    async def typed_get_ups_device(self, device_id: str) -> UPSDevice | None:
+        """Get a single UPS device by ID.
+
+        Args:
+            device_id: UPS device ID (PrefixedID).
+
+        Returns:
+            UPSDevice model, or None if no device with that ID exists.
+
+        """
+        from unraid_api.models import UPSDevice
+
+        await self.get_capabilities()
+        self._require_capability("UPS device query", "Query.upsDeviceById")
+
+        query_str = """
+            query GetUpsDevice($id: String!) {
+                upsDeviceById(id: $id) {
+                    id
+                    name
+                    model
+                    status
+                    battery { chargeLevel estimatedRuntime health }
+                    power {
+                        inputVoltage outputVoltage loadPercentage
+                        nominalPower currentPower
+                    }
+                }
+            }
+        """
+        result = await self.query(query_str, {"id": device_id})
+        device = result.get("upsDeviceById")
+        if device is None:
+            return None
+        return UPSDevice(**device)
+
+    async def subscribe_display(
+        self,
+    ) -> AsyncGenerator[DisplaySettings, None]:
+        """Subscribe to display/theme setting changes.
+
+        Yields a DisplaySettings model whenever the server's display
+        configuration (theme, temperature unit, thresholds, etc.) changes.
+
+        Yields:
+            DisplaySettings for each change event.
+
+        """
+        from unraid_api.models import DisplaySettings
+
+        subscription = """
+            subscription {
+                displaySubscription {
+                    theme
+                    unit
+                    scale
+                    tabs
+                    resize
+                    wwn
+                    total
+                    usage
+                    text
+                    warning
+                    critical
+                    hot
+                    max
+                    locale
+                }
+            }
+        """
+        async for data in self.subscribe(subscription):
+            yield DisplaySettings(**(data.get("displaySubscription") or {}))
+
+    # =========================================================================
+    # Curated Admin Methods (Unraid 7.3 / API 4.3x)
+    # =========================================================================
+
+    async def get_settings(self) -> Settings:
+        """Get server settings (read-only diagnostic view).
+
+        Returns the API configuration block and the unified settings form
+        payload. Intended for diagnostics; this library does not expose the
+        corresponding write mutations.
+
+        Returns:
+            Settings model.
+
+        """
+        from unraid_api.models import Settings
+
+        await self.get_capabilities()
+        self._require_capability("Settings query", "Query.settings")
+
+        query_str = """
+            query {
+                settings {
+                    id
+                    api {
+                        version
+                        sandbox
+                        plugins
+                        extraOrigins
+                        ssoSubIds
+                    }
+                    unified {
+                        values
+                        dataSchema
+                        uiSchema
+                    }
+                }
+            }
+        """
+        result = await self.query(query_str)
+        return Settings(**(result.get("settings") or {}))
+
+    async def configure_ups(
+        self,
+        *,
+        service: str | None = None,
+        ups_cable: str | None = None,
+        custom_ups_cable: str | None = None,
+        ups_type: str | None = None,
+        device: str | None = None,
+        override_ups_capacity: int | None = None,
+        battery_level: int | None = None,
+        minutes: int | None = None,
+        timeout: int | None = None,  # noqa: ASYNC109 — UPS config field, not an async timeout
+        kill_ups: str | None = None,
+    ) -> bool:
+        """Configure UPS (apcupsd) settings.
+
+        Pairs with get_ups_configuration(). Only the provided arguments are
+        sent to the server; omitted arguments are left unchanged.
+
+        Args:
+            service: UPS service state (e.g., "ENABLE"/"DISABLE").
+            ups_cable: Cable type enum value.
+            custom_ups_cable: Custom cable string when ups_cable is custom.
+            ups_type: UPS type enum value (e.g., "USB").
+            device: UPS device path.
+            override_ups_capacity: Override capacity (VA/W) value.
+            battery_level: Battery-level shutdown threshold (percent).
+            minutes: Runtime-remaining shutdown threshold (minutes).
+            timeout: Shutdown timeout (seconds).
+            kill_ups: Kill-power-on-shutdown enum value.
+
+        Returns:
+            True when the server accepted the configuration.
+
+        """
+        await self.get_capabilities()
+        self._require_capability("configureUps mutation", "Mutation.configureUps")
+
+        mutation = """
+            mutation ConfigureUps($config: UPSConfigInput!) {
+                configureUps(config: $config)
+            }
+        """
+        config: dict[str, Any] = {}
+        if service is not None:
+            config["service"] = service
+        if ups_cable is not None:
+            config["upsCable"] = ups_cable
+        if custom_ups_cable is not None:
+            config["customUpsCable"] = custom_ups_cable
+        if ups_type is not None:
+            config["upsType"] = ups_type
+        if device is not None:
+            config["device"] = device
+        if override_ups_capacity is not None:
+            config["overrideUpsCapacity"] = override_ups_capacity
+        if battery_level is not None:
+            config["batteryLevel"] = battery_level
+        if minutes is not None:
+            config["minutes"] = minutes
+        if timeout is not None:
+            config["timeout"] = timeout
+        if kill_ups is not None:
+            config["killUps"] = kill_ups
+        result = await self.mutate(mutation, {"config": config})
+        return bool(result.get("configureUps", False))

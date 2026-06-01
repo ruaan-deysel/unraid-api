@@ -6140,3 +6140,491 @@ class TestTypedGetContainersCapabilityGating:
         assert "exitNodeStatus" in container_query
         assert "version" in container_query
         assert len(containers) == 1
+
+
+# =============================================================================
+# Unraid 7.3 / API 4.34.0 additions
+# =============================================================================
+
+
+class TestSystemTime:
+    """Tests for system-time query/mutation methods (7.3)."""
+
+    async def test_get_system_time_returns_model(self) -> None:
+        from unraid_api.models import SystemTime
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "systemTime": {
+                            "currentTime": "2026-06-01T04:47:38.377Z",
+                            "ntpServers": ["time1.google.com", "time2.google.com"],
+                            "timeZone": "Australia/Brisbane",
+                            "useNtp": True,
+                        }
+                    }
+                },
+            )
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                st = await client.get_system_time()
+                assert isinstance(st, SystemTime)
+                assert st.timeZone == "Australia/Brisbane"
+                assert st.useNtp is True
+                assert st.ntpServers == ["time1.google.com", "time2.google.com"]
+
+    async def test_get_timezone_options_returns_list(self) -> None:
+        from unraid_api.models import TimeZoneOption
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "timeZoneOptions": [
+                            {"label": "Brisbane", "value": "Australia/Brisbane"},
+                            {"label": "UTC", "value": "UTC"},
+                        ]
+                    }
+                },
+            )
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                options = await client.get_timezone_options()
+                assert len(options) == 2
+                assert all(isinstance(o, TimeZoneOption) for o in options)
+                assert options[0].value == "Australia/Brisbane"
+
+    async def test_update_system_time_passes_only_set_fields(self) -> None:
+        captured: dict[str, object] = {}
+
+        async def capture(url, **kwargs):  # type: ignore[no-untyped-def]
+            from aioresponses.core import CallbackResult
+
+            captured["body"] = kwargs.get("json") or {}
+            return CallbackResult(
+                status=200,
+                payload={
+                    "data": {
+                        "updateSystemTime": {
+                            "currentTime": "2026-06-01T04:47:38.377Z",
+                            "ntpServers": ["pool.ntp.org"],
+                            "timeZone": "UTC",
+                            "useNtp": True,
+                        }
+                    }
+                },
+            )
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post("http://192.168.1.100/graphql", callback=capture)
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+                from unraid_api.models import SystemTime
+
+                client._capabilities = ServerCapabilities.permissive()
+                result = await client.update_system_time(
+                    time_zone="UTC",
+                    use_ntp=True,
+                    ntp_servers=["pool.ntp.org"],
+                )
+                assert isinstance(result, SystemTime)
+                assert result.timeZone == "UTC"
+
+        body = captured["body"]
+        assert isinstance(body, dict)
+        variables = body["variables"]
+        assert variables["input"]["timeZone"] == "UTC"
+        assert variables["input"]["useNtp"] is True
+        assert variables["input"]["ntpServers"] == ["pool.ntp.org"]
+        # Unset field must be omitted entirely
+        assert "manualDateTime" not in variables["input"]
+
+    async def test_get_system_time_errors_when_missing(self) -> None:
+        from unraid_api.capabilities import ServerCapabilities
+
+        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client._capabilities = ServerCapabilities.from_introspection_response(
+            {"Query": {"name": "Query", "fields": [{"name": "array"}]}}
+        )
+        with pytest.raises(UnraidAPIError, match=r"[Ss]ystem time"):
+            await client.get_system_time()
+
+    async def test_update_system_time_errors_when_missing(self) -> None:
+        from unraid_api.capabilities import ServerCapabilities
+
+        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client._capabilities = ServerCapabilities.from_introspection_response(
+            {"Mutation": {"name": "Mutation", "fields": [{"name": "archiveAll"}]}}
+        )
+        with pytest.raises(UnraidAPIError, match="updateSystemTime"):
+            await client.update_system_time(time_zone="UTC")
+
+
+class TestDiskAndUpsExtras:
+    """Tests for disk/UPS extra accessors (7.3)."""
+
+    async def test_get_assignable_disks_returns_models(self) -> None:
+        from unraid_api.models import PhysicalDisk
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "assignableDisks": [
+                            {
+                                "id": "disk:sdb",
+                                "device": "sdb",
+                                "name": "ST4000",
+                                "size": 4000787030016,
+                                "isSpinning": True,
+                            }
+                        ]
+                    }
+                },
+            )
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                disks = await client.get_assignable_disks()
+                assert len(disks) == 1
+                assert isinstance(disks[0], PhysicalDisk)
+                assert disks[0].id == "disk:sdb"
+
+    async def test_get_assignable_disks_empty(self) -> None:
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={"data": {"assignableDisks": []}},
+            )
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                assert await client.get_assignable_disks() == []
+
+    async def test_get_disk_returns_model(self) -> None:
+        from unraid_api.models import PhysicalDisk
+
+        captured: dict[str, object] = {}
+
+        async def capture(url, **kwargs):  # type: ignore[no-untyped-def]
+            from aioresponses.core import CallbackResult
+
+            captured["body"] = kwargs.get("json") or {}
+            return CallbackResult(
+                status=200,
+                payload={
+                    "data": {
+                        "disk": {
+                            "id": "disk:sda",
+                            "device": "sda",
+                            "name": "Samsung",
+                            "smartStatus": "OK",
+                        }
+                    }
+                },
+            )
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post("http://192.168.1.100/graphql", callback=capture)
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                disk = await client.get_disk("disk:sda")
+                assert isinstance(disk, PhysicalDisk)
+                assert disk.id == "disk:sda"
+
+        assert captured["body"]["variables"]["id"] == "disk:sda"  # type: ignore[index]
+
+    async def test_typed_get_ups_device_returns_model(self) -> None:
+        from unraid_api.models import UPSDevice
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "upsDeviceById": {
+                            "id": "ups:1",
+                            "name": "APC",
+                            "model": "Back-UPS",
+                            "status": "ONLINE",
+                            "battery": {"chargeLevel": 100},
+                        }
+                    }
+                },
+            )
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                ups = await client.typed_get_ups_device("ups:1")
+                assert isinstance(ups, UPSDevice)
+                assert ups.id == "ups:1"
+
+    async def test_typed_get_ups_device_returns_none(self) -> None:
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={"data": {"upsDeviceById": None}},
+            )
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                assert await client.typed_get_ups_device("ups:absent") is None
+
+    async def test_get_assignable_disks_errors_when_missing(self) -> None:
+        from unraid_api.capabilities import ServerCapabilities
+
+        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client._capabilities = ServerCapabilities.from_introspection_response(
+            {"Query": {"name": "Query", "fields": [{"name": "array"}]}}
+        )
+        with pytest.raises(UnraidAPIError, match="assignableDisks"):
+            await client.get_assignable_disks()
+
+
+class TestSubscribeDisplay:
+    """Tests for the displaySubscription wrapper (7.3)."""
+
+    async def test_subscribe_display_yields_display_settings(self) -> None:
+        from unraid_api.models import DisplaySettings
+
+        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+
+        async def fake_subscribe(subscription, variables=None):  # type: ignore[no-untyped-def]
+            assert "displaySubscription" in subscription
+            yield {"displaySubscription": {"theme": "black", "unit": "CELSIUS"}}
+
+        client.subscribe = fake_subscribe  # type: ignore[assignment]
+
+        results = [s async for s in client.subscribe_display()]
+        assert len(results) == 1
+        assert isinstance(results[0], DisplaySettings)
+        assert results[0].theme == "black"
+        assert results[0].unit == "CELSIUS"
+
+
+class TestCuratedAdmin:
+    """Tests for curated Tier-3 methods: get_settings + configure_ups (7.3)."""
+
+    async def test_get_settings_returns_model(self) -> None:
+        from unraid_api.models import Settings
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "settings": {
+                            "id": "settings",
+                            "api": {
+                                "version": "4.34.0",
+                                "sandbox": False,
+                                "plugins": ["unraid-api-plugin-connect"],
+                                "extraOrigins": [],
+                                "ssoSubIds": [],
+                            },
+                            "unified": {
+                                "values": {"foo": "bar"},
+                                "dataSchema": {},
+                                "uiSchema": {},
+                            },
+                        }
+                    }
+                },
+            )
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                settings = await client.get_settings()
+                assert isinstance(settings, Settings)
+                assert settings.api is not None
+                assert settings.api.version == "4.34.0"
+                assert settings.api.sandbox is False
+                assert settings.unified is not None
+                assert settings.unified.values == {"foo": "bar"}
+
+    async def test_configure_ups_passes_only_set_fields(self) -> None:
+        captured: dict[str, object] = {}
+
+        async def capture(url, **kwargs):  # type: ignore[no-untyped-def]
+            from aioresponses.core import CallbackResult
+
+            captured["body"] = kwargs.get("json") or {}
+            return CallbackResult(status=200, payload={"data": {"configureUps": True}})
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post("http://192.168.1.100/graphql", callback=capture)
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                ok = await client.configure_ups(
+                    service="ENABLE",
+                    ups_type="USB",
+                    battery_level=10,
+                    minutes=5,
+                )
+                assert ok is True
+
+        variables = captured["body"]["variables"]  # type: ignore[index]
+        cfg = variables["config"]
+        assert cfg["service"] == "ENABLE"
+        assert cfg["upsType"] == "USB"
+        assert cfg["batteryLevel"] == 10
+        assert cfg["minutes"] == 5
+        assert "device" not in cfg
+        assert "killUps" not in cfg
+
+    async def test_get_settings_errors_when_missing(self) -> None:
+        from unraid_api.capabilities import ServerCapabilities
+
+        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client._capabilities = ServerCapabilities.from_introspection_response(
+            {"Query": {"name": "Query", "fields": [{"name": "array"}]}}
+        )
+        with pytest.raises(UnraidAPIError, match=r"[Ss]ettings"):
+            await client.get_settings()
+
+    async def test_configure_ups_errors_when_missing(self) -> None:
+        from unraid_api.capabilities import ServerCapabilities
+
+        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client._capabilities = ServerCapabilities.from_introspection_response(
+            {"Mutation": {"name": "Mutation", "fields": [{"name": "archiveAll"}]}}
+        )
+        with pytest.raises(UnraidAPIError, match="configureUps"):
+            await client.configure_ups(service="DISABLE")
+
+
+class TestSystemTimeAndUpsAllFields:
+    """Branch coverage: every optional input field is serialized."""
+
+    async def test_update_system_time_with_manual_datetime(self) -> None:
+        captured: dict[str, object] = {}
+
+        async def capture(url, **kwargs):  # type: ignore[no-untyped-def]
+            from aioresponses.core import CallbackResult
+
+            captured["body"] = kwargs.get("json") or {}
+            return CallbackResult(
+                status=200,
+                payload={
+                    "data": {
+                        "updateSystemTime": {
+                            "currentTime": "2026-06-01T00:00:00Z",
+                            "ntpServers": [],
+                            "timeZone": "UTC",
+                            "useNtp": False,
+                        }
+                    }
+                },
+            )
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post("http://192.168.1.100/graphql", callback=capture)
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                await client.update_system_time(
+                    use_ntp=False, manual_date_time="2026-06-01T00:00:00Z"
+                )
+
+        cfg = captured["body"]["variables"]["input"]  # type: ignore[index]
+        assert cfg["useNtp"] is False
+        assert cfg["manualDateTime"] == "2026-06-01T00:00:00Z"
+        assert "timeZone" not in cfg
+        assert "ntpServers" not in cfg
+
+    async def test_configure_ups_all_fields(self) -> None:
+        captured: dict[str, object] = {}
+
+        async def capture(url, **kwargs):  # type: ignore[no-untyped-def]
+            from aioresponses.core import CallbackResult
+
+            captured["body"] = kwargs.get("json") or {}
+            return CallbackResult(status=200, payload={"data": {"configureUps": True}})
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post("http://192.168.1.100/graphql", callback=capture)
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                ok = await client.configure_ups(
+                    service="ENABLE",
+                    ups_cable="USB_CUSTOM",
+                    custom_ups_cable="custom-cable",
+                    ups_type="USB",
+                    device="/dev/usb",
+                    override_ups_capacity=1500,
+                    battery_level=20,
+                    minutes=10,
+                    timeout=30,
+                    kill_ups="YES",
+                )
+                assert ok is True
+
+        cfg = captured["body"]["variables"]["config"]  # type: ignore[index]
+        assert cfg == {
+            "service": "ENABLE",
+            "upsCable": "USB_CUSTOM",
+            "customUpsCable": "custom-cable",
+            "upsType": "USB",
+            "device": "/dev/usb",
+            "overrideUpsCapacity": 1500,
+            "batteryLevel": 20,
+            "minutes": 10,
+            "timeout": 30,
+            "killUps": "YES",
+        }
