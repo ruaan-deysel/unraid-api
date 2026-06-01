@@ -6423,9 +6423,11 @@ class TestSubscribeDisplay:
     """Tests for the displaySubscription wrapper (7.3)."""
 
     async def test_subscribe_display_yields_display_settings(self) -> None:
+        from unraid_api.capabilities import ServerCapabilities
         from unraid_api.models import DisplaySettings
 
         client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client._capabilities = ServerCapabilities.permissive()
 
         async def fake_subscribe(subscription, variables=None):  # type: ignore[no-untyped-def]
             assert "displaySubscription" in subscription
@@ -6438,6 +6440,33 @@ class TestSubscribeDisplay:
         assert isinstance(results[0], DisplaySettings)
         assert results[0].theme == "black"
         assert results[0].unit == "CELSIUS"
+
+    async def test_subscribe_display_handles_missing_payload(self) -> None:
+        from unraid_api.capabilities import ServerCapabilities
+        from unraid_api.models import DisplaySettings
+
+        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client._capabilities = ServerCapabilities.permissive()
+
+        async def fake_subscribe(subscription, variables=None):  # type: ignore[no-untyped-def]
+            yield {}  # event without a displaySubscription key
+
+        client.subscribe = fake_subscribe  # type: ignore[assignment]
+
+        results = [s async for s in client.subscribe_display()]
+        assert len(results) == 1
+        assert isinstance(results[0], DisplaySettings)
+        assert results[0].theme is None
+
+    async def test_subscribe_display_errors_when_missing(self) -> None:
+        from unraid_api.capabilities import ServerCapabilities
+
+        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client._capabilities = ServerCapabilities.from_introspection_response(
+            {"Subscription": {"name": "Subscription", "fields": [{"name": "logFile"}]}}
+        )
+        with pytest.raises(UnraidAPIError, match="displaySubscription"):
+            _ = [s async for s in client.subscribe_display()]
 
 
 class TestCuratedAdmin:

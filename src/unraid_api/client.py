@@ -4493,6 +4493,11 @@ class UnraidClient:
         """
         from unraid_api.models import DisplaySettings
 
+        await self.get_capabilities()
+        self._require_capability(
+            "displaySubscription subscription", "Subscription.displaySubscription"
+        )
+
         subscription = """
             subscription {
                 displaySubscription {
