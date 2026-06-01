@@ -82,3 +82,6 @@ dmypy.json
 # CodeQL
 codeql-db/
 codeql-results.sarif
+
+# Superpowers / skill working docs — keep out of the repo
+docs/superpowers/
