@@ -6275,6 +6275,16 @@ class TestSystemTime:
         with pytest.raises(UnraidAPIError, match="updateSystemTime"):
             await client.update_system_time(time_zone="UTC")
 
+    async def test_get_timezone_options_errors_when_missing(self) -> None:
+        from unraid_api.capabilities import ServerCapabilities
+
+        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client._capabilities = ServerCapabilities.from_introspection_response(
+            {"Query": {"name": "Query", "fields": [{"name": "array"}]}}
+        )
+        with pytest.raises(UnraidAPIError, match=r"[Tt]ime-zone options"):
+            await client.get_timezone_options()
+
 
 class TestDiskAndUpsExtras:
     """Tests for disk/UPS extra accessors (7.3)."""

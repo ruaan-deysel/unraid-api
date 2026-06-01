@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-06-01
+
+### Added
+
+Support for capabilities exposed by **Unraid 7.3 / API 4.3x** (validated against
+a live Unraid 7.3.1 / API 4.34.0 server). Every new method is capability-gated
+via the existing introspection layer, so it raises a clean `UnraidAPIError` on
+older servers that don't expose the field. The minimum supported Unraid/API
+versions are unchanged — older servers keep working.
+
+- **System time** — `get_system_time()` and `get_timezone_options()` read the
+  server clock configuration; `update_system_time(time_zone=…, use_ntp=…,
+  ntp_servers=…, manual_date_time=…)` updates it (only the provided arguments
+  are sent). New `SystemTime` and `TimeZoneOption` models.
+- **Disk & UPS extras**
+  - `get_assignable_disks()` — disks available to assign to the array
+    (returns `PhysicalDisk`; **wakes sleeping disks**).
+  - `get_disk(disk_id)` — single physical disk by ID (`PrefixedID`;
+    **wakes the disk**, like `get_physical_disks()`).
+  - `typed_get_ups_device(device_id)` — single UPS device by ID; returns
+    `None` when the device is absent. (The server types this argument as
+    `String!`, not `PrefixedID!`.)
+  - `subscribe_display()` — async generator yielding `DisplaySettings` on
+    each server-side display/theme change.
+- **Curated admin**
+  - `get_settings()` — read-only diagnostic view of the server `api` and
+    `unified` settings blocks. New `Settings`, `ApiConfig`, and
+    `UnifiedSettings` models.
+  - `configure_ups(…)` — write the apcupsd UPS configuration (pairs with the
+    existing `get_ups_configuration()`); only the provided arguments are sent.
+- New public exports: `SystemTime`, `TimeZoneOption`, `Settings`, `ApiConfig`,
+  `UnifiedSettings`.
+
 ## [1.10.0] - 2026-04-15
 
 ### Added
