@@ -34,6 +34,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   re-check of remote image digests — the WebGUI "check for updates" action
   (`refreshDockerDigests`). All three are capability-gated.
 
+### Changed
+
+- **Test suite migrated from `aioresponses` to `aiointercept`** —
+  aiohttp 3.14.0 changed `ClientResponse.__init__()` (new `stream_writer`
+  parameter), which broke `aioresponses` 0.7.8 and forced a temporary
+  `aiohttp<3.14.0` pin. The test suite now uses
+  [aiointercept](https://github.com/Polandia94/aiointercept), which routes
+  requests through a real local aiohttp test server and works with
+  aiohttp 3.14+. The `aiohttp<3.14.0` constraint is removed
+  (`aiohttp>=3.9.0` again) and the lock file is on aiohttp 3.14.1. No
+  library code changed — this only affects tests and dev dependencies.
+
+### Fixed
+
+- **Formatter version skew between pre-commit and CI** — The pre-commit
+  `ruff-format` hook was pinned to ruff v0.8.0 while the project (and the
+  publish workflow's `ruff format --check`) uses ruff 0.15.x; the two
+  disagree on formatting, which let an inconsistently formatted file reach
+  the v1.12.0 tag and fail the PyPI publish workflow. The pre-commit hook
+  is now pinned to the same ruff version as the project.
+
 ## [1.11.0] - 2026-06-01
 
 ### Added

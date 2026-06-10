@@ -1,13 +1,13 @@
-"""Tests for UnraidClient async methods using aioresponses."""
+"""Tests for UnraidClient async methods using aiointercept."""
 
 from __future__ import annotations
 
 import re
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
-from aioresponses import aioresponses
+from aiointercept import CallbackResult, aiointercept
 
 from unraid_api import UnraidClient
 from unraid_api.exceptions import (
@@ -20,7 +20,7 @@ from unraid_api.exceptions import (
 
 
 def create_ssl_error(
-    host: str = "192.168.1.100", port: int = 443
+    host: str = "unraid.test", port: int = 443
 ) -> aiohttp.ClientSSLError:
     """Create a mock aiohttp SSL error for testing."""
     os_error = OSError(1, "certificate verify failed")
@@ -42,13 +42,13 @@ class TestClientContextManager:
 
     async def test_context_manager_creates_session(self) -> None:
         """Test that context manager creates and closes session."""
-        async with UnraidClient("192.168.1.100", "test-key") as client:
+        async with UnraidClient("unraid.test", "test-key") as client:
             assert client.session is not None
             assert client._owns_session is True
 
     async def test_context_manager_closes_session(self) -> None:
         """Test that context manager closes session on exit."""
-        client = UnraidClient("192.168.1.100", "test-key")
+        client = UnraidClient("unraid.test", "test-key")
         async with client:
             session = client.session
             assert session is not None
@@ -59,7 +59,7 @@ class TestClientContextManager:
         mock_session = MagicMock(spec=aiohttp.ClientSession)
         mock_session.close = AsyncMock()
 
-        client = UnraidClient("192.168.1.100", "test-key", session=mock_session)
+        client = UnraidClient("unraid.test", "test-key", session=mock_session)
         await client.close()
 
         # Should not close injected session
@@ -71,7 +71,7 @@ class TestClientSessionCreation:
 
     async def test_create_session_with_ssl_verification(self) -> None:
         """Test session creation with SSL verification enabled."""
-        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=True)
+        client = UnraidClient("unraid.test", "test-key", verify_ssl=True)
         await client._create_session()
 
         assert client.session is not None
@@ -79,7 +79,7 @@ class TestClientSessionCreation:
 
     async def test_create_session_without_ssl_verification(self) -> None:
         """Test session creation with SSL verification disabled."""
-        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client = UnraidClient("unraid.test", "test-key", verify_ssl=False)
         await client._create_session()
 
         assert client.session is not None
@@ -87,7 +87,7 @@ class TestClientSessionCreation:
 
     async def test_create_session_idempotent(self) -> None:
         """Test that _create_session is idempotent."""
-        client = UnraidClient("192.168.1.100", "test-key")
+        client = UnraidClient("unraid.test", "test-key")
         await client._create_session()
         first_session = client.session
 
@@ -102,16 +102,16 @@ class TestRedirectDiscovery:
 
     async def test_discover_http_no_redirect(self) -> None:
         """Test discovery when server accepts HTTP (no SSL)."""
-        with aioresponses() as m:
+        async with aiointercept(mock_external_urls=True) as m:
             # GraphQL endpoint returns a non-redirect response (GET not supported)
             m.get(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 status=400,
                 body='{"errors":[{"message":"GET not supported"}]}',
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 redirect_url, use_ssl = await client._discover_redirect_url()
 
@@ -120,11 +120,11 @@ class TestRedirectDiscovery:
 
     async def test_discover_http_no_redirect_status_200(self) -> None:
         """Test discovery when server returns 200 on HTTP (no SSL)."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=200)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=200)
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 redirect_url, use_ssl = await client._discover_redirect_url()
 
@@ -134,7 +134,7 @@ class TestRedirectDiscovery:
     async def test_discover_same_port_assumes_https(self) -> None:
         """Test that http_port == https_port skips probe and assumes HTTPS."""
         async with UnraidClient(
-            "192.168.1.100",
+            "unraid.test",
             "test-key",
             http_port=4443,
             https_port=4443,
@@ -148,7 +148,7 @@ class TestRedirectDiscovery:
     async def test_discover_same_port_default_443(self) -> None:
         """Test that http_port == https_port == 443 assumes HTTPS."""
         async with UnraidClient(
-            "192.168.1.100",
+            "unraid.test",
             "test-key",
             http_port=443,
             https_port=443,
@@ -171,15 +171,15 @@ class TestRedirectDiscovery:
             "</body>\n"
             "</html>\n"
         )
-        with aioresponses() as m:
+        async with aiointercept(mock_external_urls=True) as m:
             m.get(
-                "http://192.168.1.100:8080/graphql",
+                "http://unraid.test:8080/graphql",
                 status=400,
                 body=nginx_body,
             )
 
             async with UnraidClient(
-                "192.168.1.100",
+                "unraid.test",
                 "test-key",
                 http_port=8080,
                 https_port=4443,
@@ -187,7 +187,7 @@ class TestRedirectDiscovery:
             ) as client:
                 redirect_url, use_ssl = await client._discover_redirect_url()
 
-                assert redirect_url == "https://192.168.1.100:8080/graphql"
+                assert redirect_url == "https://unraid.test:8080/graphql"
                 assert use_ssl is True
 
     async def test_discover_nginx_400_default_https_port(self) -> None:
@@ -202,15 +202,15 @@ class TestRedirectDiscovery:
             "</body>\n"
             "</html>\n"
         )
-        with aioresponses() as m:
+        async with aiointercept(mock_external_urls=True) as m:
             m.get(
-                "http://192.168.1.100:443/graphql",
+                "http://unraid.test:443/graphql",
                 status=400,
                 body=nginx_body,
             )
 
             async with UnraidClient(
-                "192.168.1.100",
+                "unraid.test",
                 "test-key",
                 http_port=443,
                 https_port=8443,
@@ -218,20 +218,20 @@ class TestRedirectDiscovery:
             ) as client:
                 redirect_url, use_ssl = await client._discover_redirect_url()
 
-                assert redirect_url == "https://192.168.1.100/graphql"
+                assert redirect_url == "https://unraid.test/graphql"
                 assert use_ssl is True
 
     async def test_discover_generic_400_is_http(self) -> None:
         """Test that a generic 400 (not nginx HTTPS error) means HTTP mode."""
-        with aioresponses() as m:
+        async with aiointercept(mock_external_urls=True) as m:
             m.get(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 status=400,
                 body="Bad Request",
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 redirect_url, use_ssl = await client._discover_redirect_url()
 
@@ -240,50 +240,50 @@ class TestRedirectDiscovery:
 
     async def test_discover_https_redirect(self) -> None:
         """Test discovery when server redirects to HTTPS."""
-        with aioresponses() as m:
+        async with aiointercept(mock_external_urls=True) as m:
             m.get(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 status=302,
-                headers={"Location": "https://192.168.1.100/graphql"},
+                headers={"Location": "https://unraid.test/graphql"},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 redirect_url, use_ssl = await client._discover_redirect_url()
 
-                assert redirect_url == "https://192.168.1.100/graphql"
+                assert redirect_url == "https://unraid.test/graphql"
                 assert use_ssl is True
 
     async def test_discover_https_redirect_with_port_443(self) -> None:
         """Test discovery normalizes redirect URL when port is 443."""
-        with aioresponses() as m:
+        async with aiointercept(mock_external_urls=True) as m:
             m.get(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 status=302,
-                headers={"Location": "https://192.168.1.100:443/graphql"},
+                headers={"Location": "https://unraid.test:443/graphql"},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 redirect_url, use_ssl = await client._discover_redirect_url()
 
                 # Port 443 should be normalized away
-                assert redirect_url == "https://192.168.1.100/graphql"
+                assert redirect_url == "https://unraid.test/graphql"
                 assert use_ssl is True
 
     async def test_discover_redirect_without_location_in_get(self) -> None:
         """Test discovery when redirect response has no Location header."""
-        with aioresponses() as m:
+        async with aiointercept(mock_external_urls=True) as m:
             m.get(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 status=302,
                 # No Location header
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 redirect_url, use_ssl = await client._discover_redirect_url()
 
@@ -293,15 +293,15 @@ class TestRedirectDiscovery:
 
     async def test_discover_redirect_to_non_https(self) -> None:
         """Test discovery when redirect goes to non-HTTPS URL."""
-        with aioresponses() as m:
+        async with aiointercept(mock_external_urls=True) as m:
             m.get(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 status=302,
                 headers={"Location": "http://other-host.local/graphql"},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 redirect_url, use_ssl = await client._discover_redirect_url()
 
@@ -316,15 +316,15 @@ class TestRedirectDiscovery:
         HTTP probe to an arbitrary HTTPS URL on a different host, which would
         cause subsequent requests (including the API key) to be sent there.
         """
-        with aioresponses() as m:
+        async with aiointercept(mock_external_urls=True) as m:
             m.get(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 status=302,
                 headers={"Location": "https://evil.example.com/graphql"},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 redirect_url, use_ssl = await client._discover_redirect_url()
 
@@ -334,29 +334,29 @@ class TestRedirectDiscovery:
 
     async def test_discover_https_redirect_same_host_accepted(self) -> None:
         """SSRF guard: HTTPS redirect to the same hostname must still work."""
-        with aioresponses() as m:
+        async with aiointercept(mock_external_urls=True) as m:
             m.get(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 status=302,
-                headers={"Location": "https://192.168.1.100/graphql"},
+                headers={"Location": "https://unraid.test/graphql"},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 redirect_url, use_ssl = await client._discover_redirect_url()
 
-                assert redirect_url == "https://192.168.1.100/graphql"
+                assert redirect_url == "https://unraid.test/graphql"
                 assert use_ssl is True
 
     async def test_discover_without_session(self) -> None:
         """Test discovery creates session if none exists."""
-        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client = UnraidClient("unraid.test", "test-key", verify_ssl=False)
         assert client._session is None
 
-        with aioresponses() as m:
+        async with aiointercept(mock_external_urls=True) as m:
             m.get(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 status=200,
             )
 
@@ -370,15 +370,15 @@ class TestRedirectDiscovery:
 
     async def test_discover_myunraid_redirect(self) -> None:
         """Test discovery when server redirects to myunraid.net."""
-        with aioresponses() as m:
+        async with aiointercept(mock_external_urls=True) as m:
             m.get(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 status=302,
                 headers={"Location": "https://myserver.myunraid.net/graphql"},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 redirect_url, use_ssl = await client._discover_redirect_url()
 
@@ -391,14 +391,14 @@ class TestRedirectDiscovery:
         When using the default HTTP port (80), a connection error should fall
         back to HTTPS — this is standard HTTP→HTTPS upgrade behavior.
         """
-        with aioresponses() as m:
+        async with aiointercept(mock_external_urls=True) as m:
             m.get(
-                "http://192.168.1.100/graphql",
-                exception=aiohttp.ClientError("Connection refused"),
+                "http://unraid.test/graphql",
+                exception=True,
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 redirect_url, use_ssl = await client._discover_redirect_url()
 
@@ -412,14 +412,14 @@ class TestRedirectDiscovery:
         port is unreachable, the library should raise instead of silently
         falling back to HTTPS on port 443. See GitHub issue #9.
         """
-        with aioresponses() as m:
+        async with aiointercept(mock_external_urls=True) as m:
             m.get(
-                "http://192.168.1.100:880/graphql",
-                exception=aiohttp.ClientError("Connection refused"),
+                "http://unraid.test:880/graphql",
+                exception=True,
             )
 
             async with UnraidClient(
-                "192.168.1.100",
+                "unraid.test",
                 "test-key",
                 http_port=880,
                 verify_ssl=False,
@@ -429,14 +429,14 @@ class TestRedirectDiscovery:
 
     async def test_discover_raises_on_timeout_custom_http_port(self) -> None:
         """Test discovery raises when custom port times out."""
-        with aioresponses() as m:
+        async with aiointercept(mock_external_urls=True) as m:
             m.get(
-                "http://192.168.1.100:8080/graphql",
-                exception=aiohttp.ClientError("Connection timeout"),
+                "http://unraid.test:8080/graphql",
+                exception=True,
             )
 
             async with UnraidClient(
-                "192.168.1.100",
+                "unraid.test",
                 "test-key",
                 http_port=8080,
                 verify_ssl=False,
@@ -450,34 +450,34 @@ class TestRedirectDiscovery:
         When the custom port is reachable and returns a valid HTTP response,
         normal redirect discovery should proceed as usual.
         """
-        with aioresponses() as m:
+        async with aiointercept(mock_external_urls=True) as m:
             m.get(
-                "http://192.168.1.100:880/graphql",
+                "http://unraid.test:880/graphql",
                 status=302,
-                headers={"Location": "https://192.168.1.100/graphql"},
+                headers={"Location": "https://unraid.test/graphql"},
             )
 
             async with UnraidClient(
-                "192.168.1.100",
+                "unraid.test",
                 "test-key",
                 http_port=880,
                 verify_ssl=False,
             ) as client:
                 redirect_url, use_ssl = await client._discover_redirect_url()
 
-                assert redirect_url == "https://192.168.1.100/graphql"
+                assert redirect_url == "https://unraid.test/graphql"
                 assert use_ssl is True
 
     async def test_discover_custom_port_http_no_redirect(self) -> None:
         """Test that a reachable custom HTTP port with no redirect works."""
-        with aioresponses() as m:
+        async with aiointercept(mock_external_urls=True) as m:
             m.get(
-                "http://192.168.1.100:880/graphql",
+                "http://unraid.test:880/graphql",
                 status=200,
             )
 
             async with UnraidClient(
-                "192.168.1.100",
+                "unraid.test",
                 "test-key",
                 http_port=880,
                 verify_ssl=False,
@@ -488,18 +488,17 @@ class TestRedirectDiscovery:
                 assert use_ssl is False
 
     async def test_discover_fallback_to_https_on_ssl_error(self) -> None:
-        """Test discovery falls back to HTTPS on SSL error (doesn't raise)."""
+        """Test discovery falls back to HTTPS on SSL error (doesn't raise).
+
+        Patches the session directly: aiointercept can only raise
+        ClientConnectionError, but this test needs a real SSL error to
+        exercise the SSL-specific discovery path.
+        """
         ssl_error = create_ssl_error()
 
-        with aioresponses() as m:
-            m.get(
-                "http://192.168.1.100/graphql",
-                exception=ssl_error,
-            )
-
-            async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
-            ) as client:
+        async with UnraidClient("unraid.test", "test-key", verify_ssl=False) as client:
+            assert client._session is not None
+            with patch.object(client._session, "get", side_effect=ssl_error):
                 # Discovery should catch SSL errors and fall back to HTTPS
                 redirect_url, use_ssl = await client._discover_redirect_url()
 
@@ -510,20 +509,18 @@ class TestRedirectDiscovery:
         """Test that SSL error on custom port raises instead of fallback."""
         ssl_error = create_ssl_error()
 
-        with aioresponses() as m:
-            m.get(
-                "http://192.168.1.100:880/graphql",
-                exception=ssl_error,
-            )
-
-            async with UnraidClient(
-                "192.168.1.100",
-                "test-key",
-                http_port=880,
-                verify_ssl=False,
-            ) as client:
-                with pytest.raises(UnraidConnectionError, match="port 880"):
-                    await client._discover_redirect_url()
+        async with UnraidClient(
+            "unraid.test",
+            "test-key",
+            http_port=880,
+            verify_ssl=False,
+        ) as client:
+            assert client._session is not None
+            with (
+                patch.object(client._session, "get", side_effect=ssl_error),
+                pytest.raises(UnraidConnectionError, match="port 880"),
+            ):
+                await client._discover_redirect_url()
 
     async def test_discover_custom_http_and_https_ports_redirect(self) -> None:
         """Test custom HTTP + HTTPS ports with redirect works end-to-end.
@@ -532,15 +529,15 @@ class TestRedirectDiscovery:
         The HTTP probe hits 8080, gets a redirect to https://host:8443/...,
         and the redirect URL is used directly.
         """
-        with aioresponses() as m:
+        async with aiointercept(mock_external_urls=True) as m:
             m.get(
-                "http://192.168.1.100:8080/graphql",
+                "http://unraid.test:8080/graphql",
                 status=302,
-                headers={"Location": "https://192.168.1.100:8443/graphql"},
+                headers={"Location": "https://unraid.test:8443/graphql"},
             )
 
             async with UnraidClient(
-                "192.168.1.100",
+                "unraid.test",
                 "test-key",
                 http_port=8080,
                 https_port=8443,
@@ -548,7 +545,7 @@ class TestRedirectDiscovery:
             ) as client:
                 redirect_url, use_ssl = await client._discover_redirect_url()
 
-                assert redirect_url == "https://192.168.1.100:8443/graphql"
+                assert redirect_url == "https://unraid.test:8443/graphql"
                 assert use_ssl is True
 
     async def test_discover_custom_http_and_https_ports_unreachable(self) -> None:
@@ -557,14 +554,14 @@ class TestRedirectDiscovery:
         Simulates wrong ports: HTTP on 8080 is unreachable. Should raise
         immediately instead of silently falling back to HTTPS on 8443.
         """
-        with aioresponses() as m:
+        async with aiointercept(mock_external_urls=True) as m:
             m.get(
-                "http://192.168.1.100:8080/graphql",
-                exception=aiohttp.ClientError("Connection refused"),
+                "http://unraid.test:8080/graphql",
+                exception=True,
             )
 
             async with UnraidClient(
-                "192.168.1.100",
+                "unraid.test",
                 "test-key",
                 http_port=8080,
                 https_port=8443,
@@ -579,17 +576,17 @@ class TestGraphQLQuery:
 
     async def test_query_success(self) -> None:
         """Test successful GraphQL query."""
-        with aioresponses() as m:
+        async with aiointercept(mock_external_urls=True) as m:
             # Mock redirect discovery
-            m.get("http://192.168.1.100/graphql", status=400)
+            m.get("http://unraid.test/graphql", status=400)
             # Mock GraphQL query
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"online": True}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.query("query { online }")
 
@@ -597,10 +594,10 @@ class TestGraphQLQuery:
 
     async def test_query_with_variables(self) -> None:
         """Test GraphQL query with variables."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "docker": {"start": {"id": "container:123", "state": "RUNNING"}}
@@ -609,7 +606,7 @@ class TestGraphQLQuery:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 mutation = """
                     mutation StartContainer($id: PrefixedID!) {
@@ -625,10 +622,10 @@ class TestGraphQLQuery:
 
     async def test_query_with_graphql_errors_and_data(self) -> None:
         """Test query that returns partial data with errors."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {"array": {"state": "STARTED"}},
                     "errors": [{"message": "UPS not configured"}],
@@ -636,7 +633,7 @@ class TestGraphQLQuery:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 # Should return data despite errors
                 result = await client.query("query { array { state } ups { status } }")
@@ -645,10 +642,10 @@ class TestGraphQLQuery:
 
     async def test_query_with_graphql_errors_no_data(self) -> None:
         """Test query that returns only errors."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {},
                     "errors": [{"message": "Unauthorized", "path": ["query"]}],
@@ -656,7 +653,7 @@ class TestGraphQLQuery:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 with pytest.raises(UnraidAPIError) as exc_info:
                     await client.query("query { secret }")
@@ -665,72 +662,71 @@ class TestGraphQLQuery:
 
     async def test_query_authentication_error(self) -> None:
         """Test query with authentication failure."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
-            m.post("http://192.168.1.100/graphql", status=401)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
+            m.post("http://unraid.test/graphql", status=401)
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 with pytest.raises(UnraidAuthenticationError):
                     await client.query("query { online }")
 
     async def test_query_forbidden_error(self) -> None:
         """Test query with forbidden response."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
-            m.post("http://192.168.1.100/graphql", status=403)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
+            m.post("http://unraid.test/graphql", status=403)
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 with pytest.raises(UnraidAuthenticationError):
                     await client.query("query { online }")
 
     async def test_query_connection_error(self) -> None:
         """Test query with connection failure."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
-                exception=aiohttp.ClientError("Connection refused"),
+                "http://unraid.test/graphql",
+                exception=True,
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 with pytest.raises(UnraidConnectionError):
                     await client.query("query { online }")
 
     async def test_query_timeout_error(self) -> None:
-        """Test query with timeout."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
-            m.post(
-                "http://192.168.1.100/graphql",
-                exception=TimeoutError("Request timed out"),
-            )
+        """Test query with timeout.
 
-            async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
-            ) as client:
-                with pytest.raises(UnraidTimeoutError):
-                    await client.query("query { online }")
+        Patches the session directly: aiointercept can only raise
+        ClientConnectionError, but this test needs a real TimeoutError to
+        exercise the timeout-wrapping path.
+        """
+        async with UnraidClient("unraid.test", "test-key", verify_ssl=False) as client:
+            client._resolved_url = "http://unraid.test/graphql"
+            assert client._session is not None
+            with (
+                patch.object(
+                    client._session,
+                    "post",
+                    side_effect=TimeoutError("Request timed out"),
+                ),
+                pytest.raises(UnraidTimeoutError),
+            ):
+                await client.query("query { online }")
 
     async def test_query_ssl_error(self) -> None:
         """Test query with SSL certificate error."""
         ssl_error = create_ssl_error()
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
-            m.post(
-                "http://192.168.1.100/graphql",
-                exception=ssl_error,
-            )
-
-            async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
-            ) as client:
+        async with UnraidClient("unraid.test", "test-key", verify_ssl=False) as client:
+            client._resolved_url = "http://unraid.test/graphql"
+            assert client._session is not None
+            with patch.object(client._session, "post", side_effect=ssl_error):
                 with pytest.raises(UnraidSSLError) as exc_info:
                     await client.query("query { online }")
 
@@ -740,22 +736,15 @@ class TestGraphQLQuery:
         """Test that UnraidSSLError can be caught as UnraidConnectionError."""
         ssl_error = create_ssl_error()
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
-            m.post(
-                "http://192.168.1.100/graphql",
-                exception=ssl_error,
-            )
-
-            async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
-            ) as client:
+        async with UnraidClient("unraid.test", "test-key", verify_ssl=False) as client:
+            client._resolved_url = "http://unraid.test/graphql"
+            assert client._session is not None
+            with patch.object(client._session, "post", side_effect=ssl_error):
                 # Should be catchable as UnraidConnectionError for backwards compat
                 with pytest.raises(UnraidConnectionError) as exc_info:
                     await client.query("query { online }")
 
                 # But should actually be UnraidSSLError
-                assert isinstance(exc_info.value, UnraidSSLError)
                 assert isinstance(exc_info.value, UnraidSSLError)
 
 
@@ -764,17 +753,17 @@ class TestMutate:
 
     async def test_mutate_calls_query(self) -> None:
         """Test that mutate delegates to query."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {"docker": {"start": {"id": "c:1", "state": "RUNNING"}}}
                 },
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.mutate(
                     "mutation { docker { start(id: $id) { id state } } }",
@@ -789,15 +778,15 @@ class TestConnectionMethods:
 
     async def test_test_connection_success(self) -> None:
         """Test successful connection test."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"online": True}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.test_connection()
 
@@ -805,15 +794,15 @@ class TestConnectionMethods:
 
     async def test_test_connection_offline(self) -> None:
         """Test connection test when server reports offline."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"online": False}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.test_connection()
 
@@ -821,10 +810,10 @@ class TestConnectionMethods:
 
     async def test_get_version(self) -> None:
         """Test getting version information."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "info": {
@@ -840,7 +829,7 @@ class TestConnectionMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_version()
 
@@ -853,10 +842,10 @@ class TestContainerMethods:
 
     async def test_start_container(self) -> None:
         """Test starting a Docker container."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "docker": {
@@ -871,7 +860,7 @@ class TestContainerMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.start_container("container:plex")
 
@@ -879,10 +868,10 @@ class TestContainerMethods:
 
     async def test_stop_container(self) -> None:
         """Test stopping a Docker container."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "docker": {
@@ -897,7 +886,7 @@ class TestContainerMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.stop_container("container:plex")
 
@@ -909,15 +898,15 @@ class TestVmMethods:
 
     async def test_start_vm(self) -> None:
         """Test starting a VM."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"vm": {"start": True}}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.start_vm("vm:windows")
 
@@ -925,15 +914,15 @@ class TestVmMethods:
 
     async def test_stop_vm(self) -> None:
         """Test stopping a VM."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"vm": {"stop": True}}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.stop_vm("vm:windows")
 
@@ -945,10 +934,10 @@ class TestArrayMethods:
 
     async def test_start_array(self) -> None:
         """Test starting the array."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "array": {"setState": {"id": "array:1", "state": "STARTED"}}
@@ -957,7 +946,7 @@ class TestArrayMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.start_array()
 
@@ -965,10 +954,10 @@ class TestArrayMethods:
 
     async def test_stop_array(self) -> None:
         """Test stopping the array."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "array": {"setState": {"id": "array:1", "state": "STOPPED"}}
@@ -977,7 +966,7 @@ class TestArrayMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.stop_array()
 
@@ -989,15 +978,15 @@ class TestParityMethods:
 
     async def test_start_parity_check(self) -> None:
         """Test starting parity check."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"parityCheck": {"start": True}}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.start_parity_check()
 
@@ -1005,15 +994,15 @@ class TestParityMethods:
 
     async def test_start_parity_check_with_correction(self) -> None:
         """Test starting parity check with correction enabled."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"parityCheck": {"start": True}}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.start_parity_check(correct=True)
 
@@ -1021,15 +1010,15 @@ class TestParityMethods:
 
     async def test_pause_parity_check(self) -> None:
         """Test pausing parity check."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"parityCheck": {"pause": True}}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.pause_parity_check()
 
@@ -1037,15 +1026,15 @@ class TestParityMethods:
 
     async def test_resume_parity_check(self) -> None:
         """Test resuming parity check."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"parityCheck": {"resume": True}}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.resume_parity_check()
 
@@ -1053,15 +1042,15 @@ class TestParityMethods:
 
     async def test_cancel_parity_check(self) -> None:
         """Test canceling parity check."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"parityCheck": {"cancel": True}}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.cancel_parity_check()
 
@@ -1073,10 +1062,10 @@ class TestDiskSpinMethods:
 
     async def test_spin_up_disk(self) -> None:
         """Test spinning up a disk."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "array": {
@@ -1087,7 +1076,7 @@ class TestDiskSpinMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.spin_up_disk("disk:1")
 
@@ -1095,10 +1084,10 @@ class TestDiskSpinMethods:
 
     async def test_spin_down_disk(self) -> None:
         """Test spinning down a disk."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "array": {
@@ -1109,7 +1098,7 @@ class TestDiskSpinMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.spin_down_disk("disk:1")
 
@@ -1121,23 +1110,23 @@ class TestRedirectFollowing:
 
     async def test_follows_redirect_on_post(self) -> None:
         """Test that POST requests follow redirects."""
-        with aioresponses() as m:
+        async with aiointercept(mock_external_urls=True) as m:
             # Discovery finds HTTP works
-            m.get("http://192.168.1.100/graphql", status=400)
+            m.get("http://unraid.test/graphql", status=400)
             # First POST gets redirect
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 status=302,
-                headers={"Location": "https://192.168.1.100/graphql"},
+                headers={"Location": "https://unraid.test/graphql"},
             )
             # Follow redirect
             m.post(
-                "https://192.168.1.100/graphql",
+                "https://unraid.test/graphql",
                 payload={"data": {"online": True}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.query("query { online }")
 
@@ -1149,10 +1138,10 @@ class TestAdditionalContainerMethods:
 
     async def test_pause_container(self) -> None:
         """Test pausing a container."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "docker": {
@@ -1167,7 +1156,7 @@ class TestAdditionalContainerMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.pause_container("container:abc123")
 
@@ -1175,10 +1164,10 @@ class TestAdditionalContainerMethods:
 
     async def test_unpause_container(self) -> None:
         """Test unpausing a container."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "docker": {
@@ -1193,7 +1182,7 @@ class TestAdditionalContainerMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.unpause_container("container:abc123")
 
@@ -1201,10 +1190,10 @@ class TestAdditionalContainerMethods:
 
     async def test_update_container(self) -> None:
         """Test updating a container."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "docker": {
@@ -1220,7 +1209,7 @@ class TestAdditionalContainerMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.update_container("container:abc123")
 
@@ -1228,10 +1217,10 @@ class TestAdditionalContainerMethods:
 
     async def test_get_containers(self) -> None:
         """Test getting all containers."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "docker": {
@@ -1246,7 +1235,7 @@ class TestAdditionalContainerMethods:
                                     "ports": [],
                                     "isUpdateAvailable": False,
                                     "isOrphaned": False,
-                                    "webUiUrl": "http://192.168.1.100:32400",
+                                    "webUiUrl": "http://unraid.test:32400",
                                     "iconUrl": "/plugins/plex/icon.png",
                                 },
                             ]
@@ -1256,7 +1245,7 @@ class TestAdditionalContainerMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_containers()
 
@@ -1270,15 +1259,15 @@ class TestAdditionalVmMethods:
 
     async def test_pause_vm(self) -> None:
         """Test pausing a VM."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"vm": {"pause": True}}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.pause_vm("vm:windows10")
 
@@ -1286,15 +1275,15 @@ class TestAdditionalVmMethods:
 
     async def test_resume_vm(self) -> None:
         """Test resuming a VM."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"vm": {"resume": True}}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.resume_vm("vm:windows10")
 
@@ -1302,15 +1291,15 @@ class TestAdditionalVmMethods:
 
     async def test_force_stop_vm(self) -> None:
         """Test force stopping a VM."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"vm": {"forceStop": True}}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.force_stop_vm("vm:windows10")
 
@@ -1318,15 +1307,15 @@ class TestAdditionalVmMethods:
 
     async def test_reboot_vm(self) -> None:
         """Test rebooting a VM."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"vm": {"reboot": True}}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.reboot_vm("vm:windows10")
 
@@ -1334,10 +1323,10 @@ class TestAdditionalVmMethods:
 
     async def test_get_vms(self) -> None:
         """Test getting all VMs."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "vms": {
@@ -1354,7 +1343,7 @@ class TestAdditionalVmMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_vms()
 
@@ -1367,10 +1356,10 @@ class TestMetricsMethods:
 
     async def test_get_metrics(self) -> None:
         """Test getting system metrics."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "metrics": {
@@ -1402,7 +1391,7 @@ class TestMetricsMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_metrics()
 
@@ -1411,10 +1400,10 @@ class TestMetricsMethods:
 
     async def test_get_system_info(self) -> None:
         """Test getting system info."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "info": {
@@ -1459,7 +1448,7 @@ class TestMetricsMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_system_info()
 
@@ -1472,10 +1461,10 @@ class TestArrayStatusMethod:
 
     async def test_get_array_status(self) -> None:
         """Test getting comprehensive array status."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "array": {
@@ -1543,7 +1532,7 @@ class TestArrayStatusMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_array_status()
 
@@ -1557,10 +1546,10 @@ class TestSharesMethod:
 
     async def test_get_shares(self) -> None:
         """Test getting all shares."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "shares": [
@@ -1592,7 +1581,7 @@ class TestSharesMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_shares()
 
@@ -1606,10 +1595,10 @@ class TestUpsMethod:
 
     async def test_get_ups_status(self) -> None:
         """Test getting UPS status."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "upsDevices": [
@@ -1637,7 +1626,7 @@ class TestUpsMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_ups_status()
 
@@ -1653,10 +1642,10 @@ class TestNotificationsMethod:
 
     async def test_get_notifications(self) -> None:
         """Test getting notifications."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "notifications": {
@@ -1698,7 +1687,7 @@ class TestNotificationsMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_notifications()
 
@@ -1708,10 +1697,10 @@ class TestNotificationsMethod:
 
     async def test_get_notifications_with_params(self) -> None:
         """Test getting notifications with parameters."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "notifications": {
@@ -1736,7 +1725,7 @@ class TestNotificationsMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_notifications(
                     notification_type="ARCHIVE", limit=10, offset=0
@@ -1750,16 +1739,16 @@ class TestEdgeCases:
 
     async def test_redirect_without_location_header(self) -> None:
         """Test handling of redirect response without Location header."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 status=302,
                 # No Location header
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 with pytest.raises(UnraidConnectionError) as exc_info:
                     await client.query("query { online }")
@@ -1768,10 +1757,10 @@ class TestEdgeCases:
 
     async def test_graphql_error_with_path(self) -> None:
         """Test GraphQL error with path information."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": None,
                     "errors": [
@@ -1784,7 +1773,7 @@ class TestEdgeCases:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 with pytest.raises(UnraidAPIError) as exc_info:
                     await client.query("query { invalid }")
@@ -1792,40 +1781,40 @@ class TestEdgeCases:
 
     async def test_use_https_when_discovery_fails(self) -> None:
         """Test that HTTPS is used when HTTP discovery fails."""
-        with aioresponses() as m:
+        async with aiointercept(mock_external_urls=True) as m:
             # HTTP fails completely
             m.get(
-                "http://192.168.1.100/graphql",
-                exception=aiohttp.ClientError("Connection refused"),
+                "http://unraid.test/graphql",
+                exception=True,
             )
             # HTTPS works
             m.post(
-                "https://192.168.1.100/graphql",
+                "https://unraid.test/graphql",
                 payload={"data": {"online": True}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.query("query { online }")
                 assert result == {"online": True}
 
     async def test_custom_https_port_in_url(self) -> None:
         """Test that custom HTTPS port is included in URL."""
-        with aioresponses() as m:
+        async with aiointercept(mock_external_urls=True) as m:
             # HTTP fails
             m.get(
-                "http://192.168.1.100/graphql",
-                exception=aiohttp.ClientError("Connection refused"),
+                "http://unraid.test/graphql",
+                exception=True,
             )
             # HTTPS on custom port works
             m.post(
-                "https://192.168.1.100:8443/graphql",
+                "https://unraid.test:8443/graphql",
                 payload={"data": {"online": True}},
             )
 
             async with UnraidClient(
-                "192.168.1.100",
+                "unraid.test",
                 "test-key",
                 https_port=8443,
                 verify_ssl=False,
@@ -1837,7 +1826,7 @@ class TestEdgeCases:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test _discover_redirect_url raises if session stays None."""
-        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client = UnraidClient("unraid.test", "test-key", verify_ssl=False)
 
         monkeypatch.setattr(client, "_create_session", AsyncMock())
 
@@ -1850,7 +1839,7 @@ class TestEdgeCases:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test _make_request raises if session stays None."""
-        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client = UnraidClient("unraid.test", "test-key", verify_ssl=False)
 
         monkeypatch.setattr(client, "_create_session", AsyncMock())
 
@@ -1861,31 +1850,31 @@ class TestEdgeCases:
 
     async def test_make_request_skips_discovery_when_url_resolved(self) -> None:
         """Test _make_request skips discovery when URL already resolved."""
-        with aioresponses() as m:
+        async with aiointercept(mock_external_urls=True) as m:
             # Only mock the POST, no GET needed since URL is pre-resolved
             m.post(
-                "https://192.168.1.100/graphql",
+                "https://unraid.test/graphql",
                 payload={"data": {"online": True}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 # Pre-set resolved URL to skip discovery
-                client._resolved_url = "https://192.168.1.100/graphql"
+                client._resolved_url = "https://unraid.test/graphql"
                 result = await client.query("query { online }")
 
                 assert result == {"online": True}
 
     async def test_make_request_creates_session_if_none(self) -> None:
         """Test that _make_request creates session if none exists."""
-        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client = UnraidClient("unraid.test", "test-key", verify_ssl=False)
         assert client._session is None
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=200)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=200)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"online": True}},
             )
 
@@ -1897,10 +1886,10 @@ class TestEdgeCases:
 
     async def test_make_request_uses_redirect_url_from_discovery(self) -> None:
         """Test that _make_request uses redirect URL from discovery."""
-        with aioresponses() as m:
+        async with aiointercept(mock_external_urls=True) as m:
             # Redirect to myunraid.net (Strict mode)
             m.get(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 status=302,
                 headers={"Location": "https://myserver.myunraid.net/graphql"},
             )
@@ -1910,7 +1899,7 @@ class TestEdgeCases:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.query("query { online }")
 
@@ -1919,10 +1908,10 @@ class TestEdgeCases:
 
     async def test_query_with_non_dict_error_items(self) -> None:
         """Test query handles non-dict error items in GraphQL response."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {},
                     "errors": ["Simple string error", "Another error"],
@@ -1930,7 +1919,7 @@ class TestEdgeCases:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 with pytest.raises(UnraidAPIError) as exc_info:
                     await client.query("query { invalid }")
@@ -1939,10 +1928,10 @@ class TestEdgeCases:
 
     async def test_partial_failure_returns_data(self) -> None:
         """Test that partial failures return data with errors logged."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {"online": True, "someField": None},
                     "errors": [
@@ -1952,7 +1941,7 @@ class TestEdgeCases:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.query("query { online someField }")
                 # Data is returned despite errors
@@ -1964,15 +1953,15 @@ class TestRemoveContainerMethod:
 
     async def test_remove_container(self) -> None:
         """Test removing a container."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"docker": {"removeContainer": True}}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.remove_container("container:abc123")
 
@@ -1980,15 +1969,15 @@ class TestRemoveContainerMethod:
 
     async def test_remove_container_with_image(self) -> None:
         """Test removing a container with its image."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"docker": {"removeContainer": True}}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.remove_container(
                     "container:abc123", with_image=True
@@ -2002,10 +1991,10 @@ class TestDisksMethod:
 
     async def test_get_disks(self) -> None:
         """Test getting physical disks."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "disks": [
@@ -2034,7 +2023,7 @@ class TestDisksMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_disks()
 
@@ -2047,10 +2036,10 @@ class TestParityHistoryMethod:
 
     async def test_get_parity_history(self) -> None:
         """Test getting parity check history."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "parityHistory": [
@@ -2074,7 +2063,7 @@ class TestParityHistoryMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_parity_history()
 
@@ -2090,10 +2079,10 @@ class TestGetServerInfoMethod:
         """Test getting server info returns ServerInfo model."""
         from unraid_api.models import ServerInfo
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "info": {
@@ -2129,8 +2118,8 @@ class TestGetServerInfoMethod:
                             },
                         },
                         "server": {
-                            "lanip": "192.168.1.100",
-                            "localurl": "http://192.168.1.100",
+                            "lanip": "unraid.test",
+                            "localurl": "http://unraid.test",
                             "remoteurl": "https://myserver.myunraid.net",
                         },
                         "registration": {
@@ -2142,7 +2131,7 @@ class TestGetServerInfoMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_server_info()
 
@@ -2160,8 +2149,8 @@ class TestGetServerInfoMethod:
                 assert result.hw_manufacturer == "Dell Inc."
                 assert result.hw_model == "PowerEdge R730"
                 assert result.api_version == "4.29.2"
-                assert result.lan_ip == "192.168.1.100"
-                assert result.local_url == "http://192.168.1.100"
+                assert result.lan_ip == "unraid.test"
+                assert result.local_url == "http://unraid.test"
                 assert result.remote_url == "https://myserver.myunraid.net"
                 assert result.license_type == "Pro"
                 assert result.license_state == "valid"
@@ -2173,10 +2162,10 @@ class TestGetServerInfoMethod:
         """Test server info falls back to baseboard when system info missing."""
         from unraid_api.models import ServerInfo
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "info": {
@@ -2222,7 +2211,7 @@ class TestGetServerInfoMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_server_info()
 
@@ -2235,10 +2224,10 @@ class TestGetServerInfoMethod:
         """Test server info with minimal data in response."""
         from unraid_api.models import ServerInfo
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "info": {
@@ -2259,7 +2248,7 @@ class TestGetServerInfoMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_server_info()
 
@@ -2278,10 +2267,10 @@ class TestGetSystemMetricsMethod:
         """Test getting system metrics returns SystemMetrics model."""
         from unraid_api.models import SystemMetrics
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "metrics": {
@@ -2305,7 +2294,7 @@ class TestGetSystemMetricsMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_system_metrics()
 
@@ -2322,10 +2311,10 @@ class TestGetSystemMetricsMethod:
         """Test system metrics with minimal response data."""
         from unraid_api.models import SystemMetrics
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "metrics": {
@@ -2338,7 +2327,7 @@ class TestGetSystemMetricsMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_system_metrics()
 
@@ -2355,10 +2344,10 @@ class TestGetSystemMetricsSafeMethod:
         """Test safe system metrics returns SystemMetrics without temperature."""
         from unraid_api.models import SystemMetrics
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "metrics": {
@@ -2386,7 +2375,7 @@ class TestGetSystemMetricsSafeMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_system_metrics_safe()
 
@@ -2409,10 +2398,10 @@ class TestGetSystemMetricsSafeMethod:
         """Test safe system metrics with minimal response data."""
         from unraid_api.models import SystemMetrics
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "metrics": {
@@ -2425,7 +2414,7 @@ class TestGetSystemMetricsSafeMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_system_metrics_safe()
 
@@ -2444,10 +2433,10 @@ class TestTypedGetContainersMethod:
         """Test getting containers returns list of DockerContainer models."""
         from unraid_api.models import DockerContainer
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "docker": {
@@ -2461,7 +2450,7 @@ class TestTypedGetContainersMethod:
                                     "autoStart": True,
                                     "ports": [
                                         {
-                                            "ip": "192.168.1.100",
+                                            "ip": "unraid.test",
                                             "privatePort": 32400,
                                             "publicPort": 32400,
                                             "type": "tcp",
@@ -2484,7 +2473,7 @@ class TestTypedGetContainersMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -2505,15 +2494,15 @@ class TestTypedGetContainersMethod:
 
     async def test_typed_get_containers_empty(self) -> None:
         """Test getting containers returns empty list when none exist."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"docker": {"containers": []}}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -2527,13 +2516,13 @@ class TestTypedGetContainersMethod:
         """Test fallback to core query when extended fields are unsupported."""
         from unraid_api.models import DockerContainer
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             # First POST (extended query) returns 400
-            m.post("http://192.168.1.100/graphql", status=400)
+            m.post("http://unraid.test/graphql", status=400)
             # Second POST (core fallback query) succeeds
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "docker": {
@@ -2554,7 +2543,7 @@ class TestTypedGetContainersMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.typed_get_containers()
 
@@ -2570,10 +2559,10 @@ class TestTypedGetContainersMethod:
         """Test extended fields are populated when server supports them."""
         from unraid_api.models import DockerContainer
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "docker": {
@@ -2586,7 +2575,7 @@ class TestTypedGetContainersMethod:
                                     "status": "Up 5 days",
                                     "autoStart": True,
                                     "isUpdateAvailable": True,
-                                    "webUiUrl": "http://192.168.1.100:32400",
+                                    "webUiUrl": "http://unraid.test:32400",
                                     "iconUrl": "/icons/plex.png",
                                     "ports": [],
                                 },
@@ -2597,7 +2586,7 @@ class TestTypedGetContainersMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -2607,18 +2596,18 @@ class TestTypedGetContainersMethod:
                 assert len(result) == 1
                 assert isinstance(result[0], DockerContainer)
                 assert result[0].isUpdateAvailable is True
-                assert result[0].webUiUrl == "http://192.168.1.100:32400"
+                assert result[0].webUiUrl == "http://unraid.test:32400"
                 assert result[0].iconUrl == "/icons/plex.png"
 
     async def test_typed_get_containers_auth_error_not_swallowed(self) -> None:
         """Test that auth errors are re-raised, not caught by fallback."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             # Extended query returns 401 (auth error)
-            m.post("http://192.168.1.100/graphql", status=401)
+            m.post("http://unraid.test/graphql", status=401)
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 with pytest.raises(UnraidAuthenticationError):
                     await client.typed_get_containers()
@@ -2663,8 +2652,6 @@ class TestTypedGetContainersMethod:
         async def capture(url, **kwargs):  # type: ignore[no-untyped-def]
             body = kwargs.get("json") or {}
             captured_requests.append(body.get("query", ""))
-            from aioresponses.core import CallbackResult
-
             return CallbackResult(
                 status=200,
                 payload={
@@ -2687,12 +2674,12 @@ class TestTypedGetContainersMethod:
                 },
             )
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
-            m.post("http://192.168.1.100/graphql", callback=capture)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
+            m.post("http://unraid.test/graphql", callback=capture)
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -2784,8 +2771,6 @@ class TestTypedGetContainersMethod:
         async def capture(url, **kwargs):  # type: ignore[no-untyped-def]
             body = kwargs.get("json") or {}
             captured_requests.append(body.get("query", ""))
-            from aioresponses.core import CallbackResult
-
             return CallbackResult(
                 status=200,
                 payload={
@@ -2810,12 +2795,12 @@ class TestTypedGetContainersMethod:
                 },
             )
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
-            m.post("http://192.168.1.100/graphql", callback=capture)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
+            m.post("http://unraid.test/graphql", callback=capture)
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -2846,10 +2831,10 @@ class TestTypedGetContainersSafeMethod:
         """Safe variant returns DockerContainer models with cheap fields."""
         from unraid_api.models import DockerContainer
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "docker": {
@@ -2865,7 +2850,7 @@ class TestTypedGetContainersSafeMethod:
                                     "autoStartOrder": 1,
                                     "isUpdateAvailable": False,
                                     "iconUrl": "/icons/plex.png",
-                                    "webUiUrl": "http://192.168.1.100:32400",
+                                    "webUiUrl": "http://unraid.test:32400",
                                     "projectUrl": "https://plex.tv",
                                     "registryUrl": "https://hub.docker.com",
                                     "supportUrl": "https://forums.plex.tv",
@@ -2887,7 +2872,7 @@ class TestTypedGetContainersSafeMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -2902,22 +2887,22 @@ class TestTypedGetContainersSafeMethod:
                 assert result[0].state == "running"
                 assert result[0].isUpdateAvailable is False
                 assert result[0].iconUrl == "/icons/plex.png"
-                assert result[0].webUiUrl == "http://192.168.1.100:32400"
+                assert result[0].webUiUrl == "http://unraid.test:32400"
                 assert result[0].tailscaleEnabled is False
                 assert result[1].name == "sonarr"
                 assert result[1].state == "stopped"
 
     async def test_typed_get_containers_safe_empty(self) -> None:
         """Safe variant returns empty list when no containers exist."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"docker": {"containers": []}}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -2929,10 +2914,10 @@ class TestTypedGetContainersSafeMethod:
 
     async def test_typed_get_containers_safe_expensive_fields_none(self) -> None:
         """Expensive fields stay None because the safe query never asks for them."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "docker": {
@@ -2952,7 +2937,7 @@ class TestTypedGetContainersSafeMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -2982,8 +2967,6 @@ class TestTypedGetContainersSafeMethod:
         async def capture(url, **kwargs):  # type: ignore[no-untyped-def]
             body = kwargs.get("json") or {}
             captured_requests.append(body.get("query", ""))
-            from aioresponses.core import CallbackResult
-
             return CallbackResult(
                 status=200,
                 payload={
@@ -3004,12 +2987,12 @@ class TestTypedGetContainersSafeMethod:
                 },
             )
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
-            m.post("http://192.168.1.100/graphql", callback=capture)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
+            m.post("http://unraid.test/graphql", callback=capture)
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -3061,8 +3044,6 @@ class TestTypedGetContainersSafeMethod:
         async def capture(url, **kwargs):  # type: ignore[no-untyped-def]
             body = kwargs.get("json") or {}
             captured_requests.append(body.get("query", ""))
-            from aioresponses.core import CallbackResult
-
             return CallbackResult(
                 status=200,
                 payload={
@@ -3083,12 +3064,12 @@ class TestTypedGetContainersSafeMethod:
                 },
             )
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
-            m.post("http://192.168.1.100/graphql", callback=capture)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
+            m.post("http://unraid.test/graphql", callback=capture)
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -3134,10 +3115,10 @@ class TestTypedGetVmsMethod:
         """Test getting VMs returns list of VmDomain models."""
         from unraid_api.models import VmDomain
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "vms": {
@@ -3159,7 +3140,7 @@ class TestTypedGetVmsMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.typed_get_vms()
 
@@ -3174,15 +3155,15 @@ class TestTypedGetVmsMethod:
 
     async def test_typed_get_vms_empty(self) -> None:
         """Test getting VMs returns empty list when none exist."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"vms": {"domains": []}}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.typed_get_vms()
 
@@ -3197,10 +3178,10 @@ class TestTypedGetUpsDevicesMethod:
         """Test getting UPS devices returns list of UPSDevice models."""
         from unraid_api.models import UPSDevice
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "upsDevices": [
@@ -3227,7 +3208,7 @@ class TestTypedGetUpsDevicesMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.typed_get_ups_devices()
 
@@ -3244,15 +3225,15 @@ class TestTypedGetUpsDevicesMethod:
 
     async def test_typed_get_ups_devices_empty(self) -> None:
         """Test getting UPS devices returns empty list when none exist."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"upsDevices": []}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.typed_get_ups_devices()
 
@@ -3267,10 +3248,10 @@ class TestTypedGetArrayMethod:
         """Test getting array returns UnraidArray model."""
         from unraid_api.models import UnraidArray
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "array": {
@@ -3328,7 +3309,7 @@ class TestTypedGetArrayMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.typed_get_array()
 
@@ -3351,10 +3332,10 @@ class TestTypedGetSharesMethod:
         """Test getting shares returns list of Share models."""
         from unraid_api.models import Share
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "shares": [
@@ -3378,7 +3359,7 @@ class TestTypedGetSharesMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.typed_get_shares()
 
@@ -3392,15 +3373,15 @@ class TestTypedGetSharesMethod:
 
     async def test_typed_get_shares_empty(self) -> None:
         """Test getting shares returns empty list when none exist."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"shares": []}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.typed_get_shares()
 
@@ -3415,10 +3396,10 @@ class TestGetNotificationOverviewMethod:
         """Test getting notification overview returns NotificationOverview model."""
         from unraid_api.models import NotificationOverview
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "notifications": {
@@ -3442,7 +3423,7 @@ class TestGetNotificationOverviewMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_notification_overview()
 
@@ -3457,10 +3438,10 @@ class TestGetNotificationOverviewMethod:
         """Test notification overview with no notifications."""
         from unraid_api.models import NotificationOverview
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "notifications": {
@@ -3484,7 +3465,7 @@ class TestGetNotificationOverviewMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_notification_overview()
 
@@ -3498,10 +3479,10 @@ class TestGetRegistrationMethod:
 
     async def test_get_registration(self) -> None:
         """Test getting registration information."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "registration": {
@@ -3516,7 +3497,7 @@ class TestGetRegistrationMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_registration()
 
@@ -3528,10 +3509,10 @@ class TestGetRegistrationMethod:
         """Test getting registration as Pydantic model."""
         from unraid_api.models import Registration
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "registration": {
@@ -3546,7 +3527,7 @@ class TestGetRegistrationMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.typed_get_registration()
 
@@ -3561,10 +3542,10 @@ class TestGetVarsMethod:
 
     async def test_get_vars(self) -> None:
         """Test getting system variables."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "vars": {
@@ -3582,7 +3563,7 @@ class TestGetVarsMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_vars()
 
@@ -3596,10 +3577,10 @@ class TestGetVarsMethod:
         """Test getting system variables as Pydantic model."""
         from unraid_api.models import Vars
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "vars": {
@@ -3616,7 +3597,7 @@ class TestGetVarsMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.typed_get_vars()
 
@@ -3633,10 +3614,10 @@ class TestGetServicesMethod:
 
     async def test_get_services(self) -> None:
         """Test getting services list."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "services": [
@@ -3660,7 +3641,7 @@ class TestGetServicesMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_services()
 
@@ -3672,10 +3653,10 @@ class TestGetServicesMethod:
         """Test getting services as Pydantic models."""
         from unraid_api.models import Service
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "services": [
@@ -3692,7 +3673,7 @@ class TestGetServicesMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.typed_get_services()
 
@@ -3707,10 +3688,10 @@ class TestGetFlashMethod:
 
     async def test_get_flash(self) -> None:
         """Test getting flash drive information."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "flash": {
@@ -3723,7 +3704,7 @@ class TestGetFlashMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_flash()
 
@@ -3733,10 +3714,10 @@ class TestGetFlashMethod:
         """Test getting flash drive as Pydantic model."""
         from unraid_api.models import Flash
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "flash": {
@@ -3749,7 +3730,7 @@ class TestGetFlashMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.typed_get_flash()
 
@@ -3762,10 +3743,10 @@ class TestGetOwnerMethod:
 
     async def test_get_owner(self) -> None:
         """Test getting owner information."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "owner": {
@@ -3778,7 +3759,7 @@ class TestGetOwnerMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_owner()
 
@@ -3788,10 +3769,10 @@ class TestGetOwnerMethod:
         """Test getting owner as Pydantic model."""
         from unraid_api.models import Owner
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "owner": {
@@ -3804,7 +3785,7 @@ class TestGetOwnerMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.typed_get_owner()
 
@@ -3817,10 +3798,10 @@ class TestGetPluginsMethod:
 
     async def test_get_plugins(self) -> None:
         """Test getting installed plugins."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "plugins": [
@@ -3836,7 +3817,7 @@ class TestGetPluginsMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_plugins()
 
@@ -3847,10 +3828,10 @@ class TestGetPluginsMethod:
         """Test getting plugins as Pydantic models."""
         from unraid_api.models import Plugin
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "plugins": [
@@ -3866,7 +3847,7 @@ class TestGetPluginsMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.typed_get_plugins()
 
@@ -3880,10 +3861,10 @@ class TestGetDockerNetworksMethod:
 
     async def test_get_docker_networks(self) -> None:
         """Test getting Docker networks."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "docker": {
@@ -3907,7 +3888,7 @@ class TestGetDockerNetworksMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_docker_networks()
 
@@ -3918,10 +3899,10 @@ class TestGetDockerNetworksMethod:
         """Test getting Docker networks as Pydantic models."""
         from unraid_api.models import DockerNetwork
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "docker": {
@@ -3945,7 +3926,7 @@ class TestGetDockerNetworksMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.typed_get_docker_networks()
 
@@ -3959,10 +3940,10 @@ class TestGetLogFilesMethod:
 
     async def test_get_log_files(self) -> None:
         """Test getting log files list."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "logFiles": [
@@ -3982,7 +3963,7 @@ class TestGetLogFilesMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_log_files()
 
@@ -3993,10 +3974,10 @@ class TestGetLogFilesMethod:
         """Test getting log files as Pydantic models."""
         from unraid_api.models import LogFile
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "logFiles": [
@@ -4011,7 +3992,7 @@ class TestGetLogFilesMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.typed_get_log_files()
 
@@ -4021,10 +4002,10 @@ class TestGetLogFilesMethod:
 
     async def test_get_log_file(self) -> None:
         """Test getting log file contents."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "logFile": {"log": "Jan 1 00:00:00 server test: Log entry\n"}
@@ -4033,7 +4014,7 @@ class TestGetLogFilesMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_log_file("log:syslog")
 
@@ -4042,10 +4023,10 @@ class TestGetLogFilesMethod:
 
     async def test_get_log_file_with_lines(self) -> None:
         """Test getting log file contents with lines parameter."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "logFile": {
@@ -4059,7 +4040,7 @@ class TestGetLogFilesMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_log_file("log:syslog", lines=10)
 
@@ -4072,10 +4053,10 @@ class TestGetArrayDisksMethod:
 
     async def test_get_array_disks(self) -> None:
         """Test getting array disk info without waking disks."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "array": {
@@ -4145,7 +4126,7 @@ class TestGetArrayDisksMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_array_disks()
 
@@ -4161,10 +4142,10 @@ class TestGetCloudMethod:
 
     async def test_get_cloud(self) -> None:
         """Test getting cloud settings emits deprecation warning."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "cloud": {
@@ -4172,7 +4153,7 @@ class TestGetCloudMethod:
                             "apiKey": {"valid": True, "error": None},
                             "relay": {"status": "connected", "timeout": "5000"},
                             "minigraphql": {"status": "CONNECTED", "timeout": 30},
-                            "cloud": {"status": "ok", "ip": "192.168.1.100"},
+                            "cloud": {"status": "ok", "ip": "unraid.test"},
                             "allowedOrigins": ["http://localhost"],
                         }
                     }
@@ -4180,7 +4161,7 @@ class TestGetCloudMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 with pytest.warns(DeprecationWarning, match="get_cloud"):
                     result = await client.get_cloud()
@@ -4191,10 +4172,10 @@ class TestGetCloudMethod:
         """Test getting cloud settings as Pydantic model emits deprecation."""
         from unraid_api.models import Cloud
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "cloud": {
@@ -4210,7 +4191,7 @@ class TestGetCloudMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 with pytest.warns(DeprecationWarning, match="typed_get_cloud"):
                     result = await client.typed_get_cloud()
@@ -4225,10 +4206,10 @@ class TestGetConnectMethod:
 
     async def test_get_connect(self) -> None:
         """Test getting Connect information emits deprecation warning."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "connect": {
@@ -4244,7 +4225,7 @@ class TestGetConnectMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 with pytest.warns(DeprecationWarning, match="get_connect"):
                     result = await client.get_connect()
@@ -4255,10 +4236,10 @@ class TestGetConnectMethod:
         """Test getting Connect as Pydantic model emits deprecation."""
         from unraid_api.models import Connect
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "connect": {
@@ -4274,7 +4255,7 @@ class TestGetConnectMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 with pytest.warns(DeprecationWarning, match="typed_get_connect"):
                     result = await client.typed_get_connect()
@@ -4289,10 +4270,10 @@ class TestGetRemoteAccessMethod:
 
     async def test_get_remote_access(self) -> None:
         """Test getting remote access emits deprecation warning."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "remoteAccess": {
@@ -4305,7 +4286,7 @@ class TestGetRemoteAccessMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 with pytest.warns(DeprecationWarning, match="get_remote_access"):
                     result = await client.get_remote_access()
@@ -4317,10 +4298,10 @@ class TestGetRemoteAccessMethod:
         """Test getting remote access model emits deprecation."""
         from unraid_api.models import RemoteAccess
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "remoteAccess": {
@@ -4333,7 +4314,7 @@ class TestGetRemoteAccessMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 with pytest.warns(
                     DeprecationWarning,
@@ -4354,10 +4335,10 @@ class TestNotificationMutations:
 
     async def test_archive_notification(self) -> None:
         """Test archiving a notification uses root-level archiveNotification."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "archiveNotification": {
@@ -4369,7 +4350,7 @@ class TestNotificationMutations:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.archive_notification("notification:123")
 
@@ -4378,10 +4359,10 @@ class TestNotificationMutations:
 
     async def test_unarchive_notification(self) -> None:
         """Test unarchiving a notification uses root-level unreadNotification."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "unreadNotification": {
@@ -4393,7 +4374,7 @@ class TestNotificationMutations:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.unarchive_notification("notification:123")
 
@@ -4402,10 +4383,10 @@ class TestNotificationMutations:
 
     async def test_delete_notification(self) -> None:
         """Test deleting a notification uses root-level deleteNotification with type."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "deleteNotification": {
@@ -4417,7 +4398,7 @@ class TestNotificationMutations:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.delete_notification(
                     "notification:123", notification_type="ARCHIVE"
@@ -4428,10 +4409,10 @@ class TestNotificationMutations:
 
     async def test_delete_notification_default_type(self) -> None:
         """Test delete_notification defaults to ARCHIVE type."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "deleteNotification": {
@@ -4443,7 +4424,7 @@ class TestNotificationMutations:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.delete_notification("notification:123")
 
@@ -4451,10 +4432,10 @@ class TestNotificationMutations:
 
     async def test_archive_all_notifications(self) -> None:
         """Test archiving all notifications uses root-level archiveAll."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "archiveAll": {
@@ -4466,7 +4447,7 @@ class TestNotificationMutations:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.archive_all_notifications()
 
@@ -4475,10 +4456,10 @@ class TestNotificationMutations:
 
     async def test_delete_all_notifications(self) -> None:
         """Test deleting all archived uses root-level deleteArchivedNotifications."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "deleteArchivedNotifications": {
@@ -4490,7 +4471,7 @@ class TestNotificationMutations:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.delete_all_notifications()
 
@@ -4503,15 +4484,15 @@ class TestResetVmMethod:
 
     async def test_reset_vm(self) -> None:
         """Test resetting a virtual machine."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"vm": {"reset": True}}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.reset_vm("vm:test-vm")
 
@@ -4524,10 +4505,10 @@ class TestArrayDiskManagementMethods:
     async def test_add_array_disk(self) -> None:
         """Test adding a disk to the array."""
         disk = {"id": "disk:sdb", "name": "disk1", "status": "DISK_OK"}
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "array": {
@@ -4541,7 +4522,7 @@ class TestArrayDiskManagementMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.add_array_disk("disk:sdb")
 
@@ -4550,10 +4531,10 @@ class TestArrayDiskManagementMethods:
     async def test_add_array_disk_with_slot(self) -> None:
         """Test adding a disk to the array with a slot parameter."""
         disk = {"id": "disk:sdb", "name": "disk1", "status": "DISK_OK"}
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "array": {
@@ -4567,7 +4548,7 @@ class TestArrayDiskManagementMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.add_array_disk("disk:sdb", slot=3)
 
@@ -4575,10 +4556,10 @@ class TestArrayDiskManagementMethods:
 
     async def test_remove_array_disk(self) -> None:
         """Test removing a disk from the array."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "array": {
@@ -4592,7 +4573,7 @@ class TestArrayDiskManagementMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.remove_array_disk("disk:sdb")
 
@@ -4600,10 +4581,10 @@ class TestArrayDiskManagementMethods:
 
     async def test_remove_array_disk_with_slot(self) -> None:
         """Test removing a disk from the array with a slot parameter."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "array": {
@@ -4617,7 +4598,7 @@ class TestArrayDiskManagementMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.remove_array_disk("disk:sdb", slot=5)
 
@@ -4625,15 +4606,15 @@ class TestArrayDiskManagementMethods:
 
     async def test_clear_disk_stats(self) -> None:
         """Test clearing disk statistics."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"array": {"clearArrayDiskStatistics": True}}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.clear_disk_stats("disk:sdb")
 
@@ -4645,11 +4626,11 @@ class TestRestartContainerMethod:
 
     async def test_restart_container(self) -> None:
         """Test restart_container calls stop then start."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             # Stop response
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "docker": {
@@ -4664,7 +4645,7 @@ class TestRestartContainerMethod:
             )
             # Start response
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "docker": {
@@ -4679,7 +4660,7 @@ class TestRestartContainerMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.restart_container("container:plex", delay=0.0)
 
@@ -4698,10 +4679,10 @@ class TestContainerLogMethods:
 
     async def test_get_container_logs(self) -> None:
         """Test getting raw container logs."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "docker": {
@@ -4725,7 +4706,7 @@ class TestContainerLogMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_container_logs("container:abc123", tail=10)
 
@@ -4735,10 +4716,10 @@ class TestContainerLogMethods:
 
     async def test_get_container_logs_with_since(self) -> None:
         """Test getting container logs with since parameter."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "docker": {
@@ -4753,7 +4734,7 @@ class TestContainerLogMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_container_logs(
                     "container:abc123", since="2026-01-15T10:30:00Z"
@@ -4764,10 +4745,10 @@ class TestContainerLogMethods:
 
     async def test_typed_get_container_logs(self) -> None:
         """Test getting typed container logs."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "docker": {
@@ -4787,7 +4768,7 @@ class TestContainerLogMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 logs = await client.typed_get_container_logs("container:abc123", tail=5)
 
@@ -4802,10 +4783,10 @@ class TestUserAccountMethods:
 
     async def test_get_me(self) -> None:
         """Test getting current user info."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "me": {
@@ -4819,7 +4800,7 @@ class TestUserAccountMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_me()
 
@@ -4829,10 +4810,10 @@ class TestUserAccountMethods:
 
     async def test_typed_get_me(self) -> None:
         """Test getting current user as typed model."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "me": {
@@ -4846,7 +4827,7 @@ class TestUserAccountMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 user = await client.typed_get_me()
 
@@ -4860,10 +4841,10 @@ class TestApiKeyManagementMethods:
 
     async def test_get_api_keys(self) -> None:
         """Test listing all API keys."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "apiKeys": [
@@ -4887,7 +4868,7 @@ class TestApiKeyManagementMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_api_keys()
 
@@ -4897,10 +4878,10 @@ class TestApiKeyManagementMethods:
 
     async def test_typed_get_api_keys(self) -> None:
         """Test listing API keys as typed models."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "apiKeys": [
@@ -4917,7 +4898,7 @@ class TestApiKeyManagementMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 keys = await client.typed_get_api_keys()
 
@@ -4928,10 +4909,10 @@ class TestApiKeyManagementMethods:
 
     async def test_create_api_key(self) -> None:
         """Test creating a new API key."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "apiKey": {
@@ -4949,7 +4930,7 @@ class TestApiKeyManagementMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.create_api_key(
                     "New Key",
@@ -4963,10 +4944,10 @@ class TestApiKeyManagementMethods:
 
     async def test_create_api_key_minimal(self) -> None:
         """Test creating an API key with only required fields."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "apiKey": {
@@ -4984,7 +4965,7 @@ class TestApiKeyManagementMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.create_api_key("Minimal")
 
@@ -4992,10 +4973,10 @@ class TestApiKeyManagementMethods:
 
     async def test_update_api_key(self) -> None:
         """Test updating an API key."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "apiKey": {
@@ -5011,7 +4992,7 @@ class TestApiKeyManagementMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.update_api_key(
                     "apikey:123",
@@ -5024,10 +5005,10 @@ class TestApiKeyManagementMethods:
 
     async def test_update_api_key_no_optional_params(self) -> None:
         """Test updating an API key with no optional params (id only)."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "apiKey": {
@@ -5043,7 +5024,7 @@ class TestApiKeyManagementMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.update_api_key("apikey:123")
 
@@ -5051,10 +5032,10 @@ class TestApiKeyManagementMethods:
 
     async def test_delete_api_keys(self) -> None:
         """Test deleting API keys."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "apiKey": {
@@ -5065,7 +5046,7 @@ class TestApiKeyManagementMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.delete_api_keys(["apikey:123", "apikey:456"])
 
@@ -5080,7 +5061,7 @@ class TestCloseExceptionHandling:
         mock_session = MagicMock(spec=aiohttp.ClientSession)
         mock_session.close = AsyncMock(side_effect=Exception("cleanup error"))
 
-        client = UnraidClient("192.168.1.100", "test-key")
+        client = UnraidClient("unraid.test", "test-key")
         client._session = mock_session
         client._owns_session = True
 
@@ -5093,44 +5074,49 @@ class TestMakeRequestExceptionWrapping:
     """Tests for exception wrapping in _make_request."""
 
     async def test_client_response_error_401_wrapped(self) -> None:
-        """Test that ClientResponseError 401 becomes UnraidAuthenticationError."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
-            m.post(
-                "http://192.168.1.100/graphql",
-                exception=aiohttp.ClientResponseError(
-                    request_info=MagicMock(),
-                    history=(),
-                    status=401,
-                    message="Unauthorized",
-                ),
-            )
+        """Test that ClientResponseError 401 becomes UnraidAuthenticationError.
 
-            async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
-            ) as client:
-                with pytest.raises(UnraidAuthenticationError):
-                    await client.query("query { online }")
+        Patches the session directly: aiointercept can only raise
+        ClientConnectionError, but this test needs a raised
+        ClientResponseError to exercise the wrapping path.
+        """
+        async with UnraidClient("unraid.test", "test-key", verify_ssl=False) as client:
+            client._resolved_url = "http://unraid.test/graphql"
+            assert client._session is not None
+            with (
+                patch.object(
+                    client._session,
+                    "post",
+                    side_effect=aiohttp.ClientResponseError(
+                        request_info=MagicMock(),
+                        history=(),
+                        status=401,
+                        message="Unauthorized",
+                    ),
+                ),
+                pytest.raises(UnraidAuthenticationError),
+            ):
+                await client.query("query { online }")
 
     async def test_client_response_error_500_wrapped(self) -> None:
         """Test that ClientResponseError 500 becomes UnraidAPIError."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
-            m.post(
-                "http://192.168.1.100/graphql",
-                exception=aiohttp.ClientResponseError(
-                    request_info=MagicMock(),
-                    history=(),
-                    status=500,
-                    message="Internal Server Error",
+        async with UnraidClient("unraid.test", "test-key", verify_ssl=False) as client:
+            client._resolved_url = "http://unraid.test/graphql"
+            assert client._session is not None
+            with (
+                patch.object(
+                    client._session,
+                    "post",
+                    side_effect=aiohttp.ClientResponseError(
+                        request_info=MagicMock(),
+                        history=(),
+                        status=500,
+                        message="Internal Server Error",
+                    ),
                 ),
-            )
-
-            async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
-            ) as client:
-                with pytest.raises(UnraidAPIError, match="HTTP error 500"):
-                    await client.query("query { online }")
+                pytest.raises(UnraidAPIError, match="HTTP error 500"),
+            ):
+                await client.query("query { online }")
 
 
 class TestDiscoverTimeoutCustomPort:
@@ -5138,20 +5124,22 @@ class TestDiscoverTimeoutCustomPort:
 
     async def test_timeout_custom_port_raises(self) -> None:
         """Test that timeout on custom port raises UnraidTimeoutError."""
-        with aioresponses() as m:
-            m.get(
-                "http://192.168.1.100:880/graphql",
-                exception=TimeoutError("Connection timed out"),
-            )
-
-            async with UnraidClient(
-                "192.168.1.100",
-                "test-key",
-                http_port=880,
-                verify_ssl=False,
-            ) as client:
-                with pytest.raises(UnraidTimeoutError, match="port 880"):
-                    await client._discover_redirect_url()
+        async with UnraidClient(
+            "unraid.test",
+            "test-key",
+            http_port=880,
+            verify_ssl=False,
+        ) as client:
+            assert client._session is not None
+            with (
+                patch.object(
+                    client._session,
+                    "get",
+                    side_effect=TimeoutError("Connection timed out"),
+                ),
+                pytest.raises(UnraidTimeoutError, match="port 880"),
+            ):
+                await client._discover_redirect_url()
 
 
 class TestCheckCompatibility:
@@ -5160,10 +5148,10 @@ class TestCheckCompatibility:
     async def test_compatible_versions(self) -> None:
         """Test check_compatibility with compatible versions."""
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "info": {
@@ -5174,7 +5162,7 @@ class TestCheckCompatibility:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.check_compatibility()
                 assert result.unraid == "7.2.4"
@@ -5184,10 +5172,10 @@ class TestCheckCompatibility:
         """Test check_compatibility raises for old API version."""
         from unraid_api.exceptions import UnraidVersionError
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "info": {
@@ -5198,7 +5186,7 @@ class TestCheckCompatibility:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 with pytest.raises(UnraidVersionError, match="API version"):
                     await client.check_compatibility()
@@ -5207,10 +5195,10 @@ class TestCheckCompatibility:
         """Test check_compatibility raises for old Unraid version."""
         from unraid_api.exceptions import UnraidVersionError
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "info": {
@@ -5221,17 +5209,17 @@ class TestCheckCompatibility:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 with pytest.raises(UnraidVersionError, match="Unraid version"):
                     await client.check_compatibility()
 
     async def test_unknown_version_no_raise(self) -> None:
         """Test check_compatibility doesn't raise for unparseable versions."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "info": {
@@ -5244,7 +5232,7 @@ class TestCheckCompatibility:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 # Should not raise - just warns about unparseable versions
                 result = await client.check_compatibility()
@@ -5258,10 +5246,10 @@ class TestGetContainerUpdateStatusesMethod:
         """Test getting container update statuses returns list of models."""
         from unraid_api.models import ContainerUpdateStatus
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "docker": {
@@ -5281,7 +5269,7 @@ class TestGetContainerUpdateStatusesMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_container_update_statuses()
 
@@ -5294,15 +5282,15 @@ class TestGetContainerUpdateStatusesMethod:
 
     async def test_get_container_update_statuses_empty(self) -> None:
         """Test getting container update statuses with no containers."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"docker": {"containerUpdateStatuses": []}}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_container_update_statuses()
                 assert result == []
@@ -5315,10 +5303,10 @@ class TestGetUpsConfigurationMethod:
         """Test getting UPS configuration returns model."""
         from unraid_api.models import UPSConfiguration
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "upsConfiguration": {
@@ -5342,7 +5330,7 @@ class TestGetUpsConfigurationMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_ups_configuration()
 
@@ -5359,15 +5347,15 @@ class TestGetUpsConfigurationMethod:
         """Test getting UPS configuration when no UPS configured."""
         from unraid_api.models import UPSConfiguration
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"upsConfiguration": {}}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_ups_configuration()
 
@@ -5383,10 +5371,10 @@ class TestGetDisplaySettingsMethod:
         """Test getting display settings returns model with temp thresholds."""
         from unraid_api.models import DisplaySettings
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "info": {
@@ -5412,7 +5400,7 @@ class TestGetDisplaySettingsMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_display_settings()
 
@@ -5429,15 +5417,15 @@ class TestGetDisplaySettingsMethod:
         """Test getting display settings with empty response."""
         from unraid_api.models import DisplaySettings
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"info": {"display": {}}}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_display_settings()
 
@@ -5454,10 +5442,10 @@ class TestGetDockerPortConflictsMethod:
         """Test getting Docker port conflicts returns model."""
         from unraid_api.models import DockerPortConflicts
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "docker": {
@@ -5477,7 +5465,7 @@ class TestGetDockerPortConflictsMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_docker_port_conflicts()
 
@@ -5491,15 +5479,15 @@ class TestGetDockerPortConflictsMethod:
         """Test getting Docker port conflicts with no conflicts."""
         from unraid_api.models import DockerPortConflicts
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"docker": {"portConflicts": {"lanPorts": []}}}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_docker_port_conflicts()
 
@@ -5514,10 +5502,10 @@ class TestGetTemperatureMetricsMethod:
         """Test getting temperature metrics returns TemperatureMetrics."""
         from unraid_api.models import TemperatureMetrics
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "metrics": {
@@ -5572,7 +5560,7 @@ class TestGetTemperatureMetricsMethod:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_temperature_metrics()
 
@@ -5591,15 +5579,15 @@ class TestGetTemperatureMetricsMethod:
         """Test get_temperature_metrics with empty response."""
         from unraid_api.models import TemperatureMetrics
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"metrics": {}}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_temperature_metrics()
 
@@ -5613,10 +5601,10 @@ class TestGetMetricsAuditFields:
 
     async def test_get_metrics_memory_active_buffcache(self) -> None:
         """Test get_metrics includes active and buffcache memory fields."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "metrics": {
@@ -5640,7 +5628,7 @@ class TestGetMetricsAuditFields:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_metrics()
 
@@ -5649,10 +5637,10 @@ class TestGetMetricsAuditFields:
 
     async def test_get_metrics_per_cpu_fields(self) -> None:
         """Test get_metrics returns all per-cpu fields."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "metrics": {
@@ -5678,7 +5666,7 @@ class TestGetMetricsAuditFields:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_metrics()
 
@@ -5694,10 +5682,10 @@ class TestGetNotificationsAuditFields:
 
     async def test_get_notifications_all_fields(self) -> None:
         """Test get_notifications includes link, type, formattedTimestamp."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "notifications": {
@@ -5734,7 +5722,7 @@ class TestGetNotificationsAuditFields:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_notifications()
 
@@ -5749,10 +5737,10 @@ class TestGetPhysicalDisksAuditFields:
 
     async def test_get_physical_disks_extended_fields(self) -> None:
         """Test get_physical_disks includes serialNum, firmwareRevision, partitions."""
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "disks": [
@@ -5782,7 +5770,7 @@ class TestGetPhysicalDisksAuditFields:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.get_physical_disks()
 
@@ -5800,10 +5788,10 @@ class TestTypedGetSharesCommentField:
         """Test typed_get_shares includes comment in results."""
         from unraid_api.models import Share
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "shares": [
@@ -5821,7 +5809,7 @@ class TestTypedGetSharesCommentField:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 result = await client.typed_get_shares()
 
@@ -5834,10 +5822,10 @@ class TestNetworkQuery:
     """Tests for get_network / typed_get_network."""
 
     async def test_get_network_returns_raw_dict(self) -> None:
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "network": {
@@ -5855,7 +5843,7 @@ class TestNetworkQuery:
                 },
             )
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -5868,10 +5856,10 @@ class TestNetworkQuery:
     async def test_typed_get_network_returns_model(self) -> None:
         from unraid_api.models import Network
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "network": {
@@ -5895,7 +5883,7 @@ class TestNetworkQuery:
                 },
             )
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -5916,10 +5904,10 @@ class TestCreateNotificationMutation:
     async def test_create_notification_full_fields(self) -> None:
         from unraid_api.models import Notification
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "createNotification": {
@@ -5937,7 +5925,7 @@ class TestCreateNotificationMutation:
                 },
             )
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -5958,10 +5946,10 @@ class TestCreateNotificationMutation:
     async def test_create_notification_without_link(self) -> None:
         from unraid_api.models import Notification
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "createNotification": {
@@ -5979,7 +5967,7 @@ class TestCreateNotificationMutation:
                 },
             )
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -5997,10 +5985,10 @@ class TestCreateNotificationMutation:
     async def test_notify_if_unique_returns_model_on_new(self) -> None:
         from unraid_api.models import Notification
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "notifyIfUnique": {
@@ -6018,7 +6006,7 @@ class TestCreateNotificationMutation:
                 },
             )
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -6033,14 +6021,14 @@ class TestCreateNotificationMutation:
                 assert result.id == "notification:789"
 
     async def test_notify_if_unique_returns_none_on_duplicate(self) -> None:
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"notifyIfUnique": None}},
             )
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -6061,8 +6049,6 @@ class TestUpdateTemperatureConfigMutation:
         captured: dict[str, object] = {}
 
         async def capture(url, **kwargs):  # type: ignore[no-untyped-def]
-            from aioresponses.core import CallbackResult
-
             body = kwargs.get("json") or {}
             captured["body"] = body
             return CallbackResult(
@@ -6070,12 +6056,12 @@ class TestUpdateTemperatureConfigMutation:
                 payload={"data": {"updateTemperatureConfig": True}},
             )
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
-            m.post("http://192.168.1.100/graphql", callback=capture)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
+            m.post("http://unraid.test/graphql", callback=capture)
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -6138,13 +6124,13 @@ class TestCapabilitiesIntegration:
             query_fields=["array", "network", "docker"],
             mutation_fields=["createNotification"],
         )
-        with aioresponses() as m:
-            m.post("https://192.168.1.100/graphql", payload=payload)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.post("https://unraid.test/graphql", payload=payload)
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
-                client._resolved_url = "https://192.168.1.100/graphql"
+                client._resolved_url = "https://unraid.test/graphql"
                 caps_a = await client.get_capabilities()
                 caps_b = await client.get_capabilities()
 
@@ -6155,16 +6141,16 @@ class TestCapabilitiesIntegration:
 
     async def test_get_capabilities_falls_back_to_permissive_on_error(self) -> None:
         """Introspection failure returns permissive capabilities, not an error."""
-        with aioresponses() as m:
+        async with aiointercept(mock_external_urls=True) as m:
             m.post(
-                "https://192.168.1.100/graphql",
+                "https://unraid.test/graphql",
                 payload={"errors": [{"message": "introspection disabled"}]},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
-                client._resolved_url = "https://192.168.1.100/graphql"
+                client._resolved_url = "https://unraid.test/graphql"
                 caps = await client.get_capabilities()
 
         assert caps.is_permissive is True
@@ -6172,13 +6158,13 @@ class TestCapabilitiesIntegration:
 
     async def test_get_capabilities_propagates_auth_error(self) -> None:
         """An auth failure during introspection should surface, not degrade."""
-        with aioresponses() as m:
-            m.post("https://192.168.1.100/graphql", status=401)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.post("https://unraid.test/graphql", status=401)
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
-                client._resolved_url = "https://192.168.1.100/graphql"
+                client._resolved_url = "https://unraid.test/graphql"
                 with pytest.raises(UnraidAuthenticationError):
                     await client.get_capabilities()
 
@@ -6197,7 +6183,7 @@ class TestNewFeaturesCapabilityGating:
     ) -> UnraidClient:
         from unraid_api.capabilities import ServerCapabilities
 
-        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client = UnraidClient("unraid.test", "test-key", verify_ssl=False)
         client._capabilities = ServerCapabilities.from_introspection_response(
             _capabilities_payload(
                 query_fields=queries or [],
@@ -6264,7 +6250,7 @@ class TestNewFeaturesCapabilityGating:
         """Permissive capabilities (introspection failed) must not gate."""
         from unraid_api.capabilities import ServerCapabilities
 
-        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client = UnraidClient("unraid.test", "test-key", verify_ssl=False)
         client._capabilities = ServerCapabilities.permissive()
         # _require_capability must be a no-op in permissive mode
         client._require_capability("X", "Query.anything")
@@ -6279,8 +6265,6 @@ class TestTypedGetContainersCapabilityGating:
         tailscale_fields: list[str],
         container_response: dict[str, object],
     ) -> tuple[list[str], object]:
-        from aioresponses.core import CallbackResult
-
         captured: dict[str, object] = {}
 
         def capture(url: object, **kwargs: object) -> CallbackResult:
@@ -6303,13 +6287,13 @@ class TestTypedGetContainersCapabilityGating:
                 payload={"data": {"docker": {"containers": [container_response]}}}
             )
 
-        with aioresponses() as m:
-            m.post("https://192.168.1.100/graphql", callback=capture, repeat=True)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.post("https://unraid.test/graphql", callback=capture, repeat=True)
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
-                client._resolved_url = "https://192.168.1.100/graphql"
+                client._resolved_url = "https://unraid.test/graphql"
                 containers = await client.typed_get_containers()
 
         calls = captured.get("queries")
@@ -6442,10 +6426,10 @@ class TestSystemTime:
     async def test_get_system_time_returns_model(self) -> None:
         from unraid_api.models import SystemTime
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "systemTime": {
@@ -6458,7 +6442,7 @@ class TestSystemTime:
                 },
             )
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -6472,10 +6456,10 @@ class TestSystemTime:
     async def test_get_timezone_options_returns_list(self) -> None:
         from unraid_api.models import TimeZoneOption
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "timeZoneOptions": [
@@ -6486,7 +6470,7 @@ class TestSystemTime:
                 },
             )
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -6500,8 +6484,6 @@ class TestSystemTime:
         captured: dict[str, object] = {}
 
         async def capture(url, **kwargs):  # type: ignore[no-untyped-def]
-            from aioresponses.core import CallbackResult
-
             captured["body"] = kwargs.get("json") or {}
             return CallbackResult(
                 status=200,
@@ -6517,11 +6499,11 @@ class TestSystemTime:
                 },
             )
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
-            m.post("http://192.168.1.100/graphql", callback=capture)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
+            m.post("http://unraid.test/graphql", callback=capture)
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
                 from unraid_api.models import SystemTime
@@ -6547,7 +6529,7 @@ class TestSystemTime:
     async def test_get_system_time_errors_when_missing(self) -> None:
         from unraid_api.capabilities import ServerCapabilities
 
-        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client = UnraidClient("unraid.test", "test-key", verify_ssl=False)
         client._capabilities = ServerCapabilities.from_introspection_response(
             {"Query": {"name": "Query", "fields": [{"name": "array"}]}}
         )
@@ -6557,7 +6539,7 @@ class TestSystemTime:
     async def test_update_system_time_errors_when_missing(self) -> None:
         from unraid_api.capabilities import ServerCapabilities
 
-        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client = UnraidClient("unraid.test", "test-key", verify_ssl=False)
         client._capabilities = ServerCapabilities.from_introspection_response(
             {"Mutation": {"name": "Mutation", "fields": [{"name": "archiveAll"}]}}
         )
@@ -6567,7 +6549,7 @@ class TestSystemTime:
     async def test_get_timezone_options_errors_when_missing(self) -> None:
         from unraid_api.capabilities import ServerCapabilities
 
-        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client = UnraidClient("unraid.test", "test-key", verify_ssl=False)
         client._capabilities = ServerCapabilities.from_introspection_response(
             {"Query": {"name": "Query", "fields": [{"name": "array"}]}}
         )
@@ -6581,10 +6563,10 @@ class TestDiskAndUpsExtras:
     async def test_get_assignable_disks_returns_models(self) -> None:
         from unraid_api.models import PhysicalDisk
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "assignableDisks": [
@@ -6600,7 +6582,7 @@ class TestDiskAndUpsExtras:
                 },
             )
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -6611,14 +6593,14 @@ class TestDiskAndUpsExtras:
                 assert disks[0].id == "disk:sdb"
 
     async def test_get_assignable_disks_empty(self) -> None:
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"assignableDisks": []}},
             )
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -6631,8 +6613,6 @@ class TestDiskAndUpsExtras:
         captured: dict[str, object] = {}
 
         async def capture(url, **kwargs):  # type: ignore[no-untyped-def]
-            from aioresponses.core import CallbackResult
-
             captured["body"] = kwargs.get("json") or {}
             return CallbackResult(
                 status=200,
@@ -6648,11 +6628,11 @@ class TestDiskAndUpsExtras:
                 },
             )
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
-            m.post("http://192.168.1.100/graphql", callback=capture)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
+            m.post("http://unraid.test/graphql", callback=capture)
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -6666,10 +6646,10 @@ class TestDiskAndUpsExtras:
     async def test_typed_get_ups_device_returns_model(self) -> None:
         from unraid_api.models import UPSDevice
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "upsDeviceById": {
@@ -6683,7 +6663,7 @@ class TestDiskAndUpsExtras:
                 },
             )
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -6693,14 +6673,14 @@ class TestDiskAndUpsExtras:
                 assert ups.id == "ups:1"
 
     async def test_typed_get_ups_device_returns_none(self) -> None:
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"upsDeviceById": None}},
             )
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -6710,7 +6690,7 @@ class TestDiskAndUpsExtras:
     async def test_get_assignable_disks_errors_when_missing(self) -> None:
         from unraid_api.capabilities import ServerCapabilities
 
-        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client = UnraidClient("unraid.test", "test-key", verify_ssl=False)
         client._capabilities = ServerCapabilities.from_introspection_response(
             {"Query": {"name": "Query", "fields": [{"name": "array"}]}}
         )
@@ -6725,7 +6705,7 @@ class TestSubscribeDisplay:
         from unraid_api.capabilities import ServerCapabilities
         from unraid_api.models import DisplaySettings
 
-        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client = UnraidClient("unraid.test", "test-key", verify_ssl=False)
         client._capabilities = ServerCapabilities.permissive()
 
         async def fake_subscribe(subscription, variables=None):  # type: ignore[no-untyped-def]
@@ -6744,7 +6724,7 @@ class TestSubscribeDisplay:
         from unraid_api.capabilities import ServerCapabilities
         from unraid_api.models import DisplaySettings
 
-        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client = UnraidClient("unraid.test", "test-key", verify_ssl=False)
         client._capabilities = ServerCapabilities.permissive()
 
         async def fake_subscribe(subscription, variables=None):  # type: ignore[no-untyped-def]
@@ -6760,7 +6740,7 @@ class TestSubscribeDisplay:
     async def test_subscribe_display_errors_when_missing(self) -> None:
         from unraid_api.capabilities import ServerCapabilities
 
-        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client = UnraidClient("unraid.test", "test-key", verify_ssl=False)
         client._capabilities = ServerCapabilities.from_introspection_response(
             {"Subscription": {"name": "Subscription", "fields": [{"name": "logFile"}]}}
         )
@@ -6774,10 +6754,10 @@ class TestCuratedAdmin:
     async def test_get_settings_returns_model(self) -> None:
         from unraid_api.models import Settings
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "settings": {
@@ -6799,7 +6779,7 @@ class TestCuratedAdmin:
                 },
             )
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -6816,16 +6796,14 @@ class TestCuratedAdmin:
         captured: dict[str, object] = {}
 
         async def capture(url, **kwargs):  # type: ignore[no-untyped-def]
-            from aioresponses.core import CallbackResult
-
             captured["body"] = kwargs.get("json") or {}
             return CallbackResult(status=200, payload={"data": {"configureUps": True}})
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
-            m.post("http://192.168.1.100/graphql", callback=capture)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
+            m.post("http://unraid.test/graphql", callback=capture)
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -6850,7 +6828,7 @@ class TestCuratedAdmin:
     async def test_get_settings_errors_when_missing(self) -> None:
         from unraid_api.capabilities import ServerCapabilities
 
-        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client = UnraidClient("unraid.test", "test-key", verify_ssl=False)
         client._capabilities = ServerCapabilities.from_introspection_response(
             {"Query": {"name": "Query", "fields": [{"name": "array"}]}}
         )
@@ -6860,7 +6838,7 @@ class TestCuratedAdmin:
     async def test_configure_ups_errors_when_missing(self) -> None:
         from unraid_api.capabilities import ServerCapabilities
 
-        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client = UnraidClient("unraid.test", "test-key", verify_ssl=False)
         client._capabilities = ServerCapabilities.from_introspection_response(
             {"Mutation": {"name": "Mutation", "fields": [{"name": "archiveAll"}]}}
         )
@@ -6875,8 +6853,6 @@ class TestSystemTimeAndUpsAllFields:
         captured: dict[str, object] = {}
 
         async def capture(url, **kwargs):  # type: ignore[no-untyped-def]
-            from aioresponses.core import CallbackResult
-
             captured["body"] = kwargs.get("json") or {}
             return CallbackResult(
                 status=200,
@@ -6892,11 +6868,11 @@ class TestSystemTimeAndUpsAllFields:
                 },
             )
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
-            m.post("http://192.168.1.100/graphql", callback=capture)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
+            m.post("http://unraid.test/graphql", callback=capture)
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -6915,16 +6891,14 @@ class TestSystemTimeAndUpsAllFields:
         captured: dict[str, object] = {}
 
         async def capture(url, **kwargs):  # type: ignore[no-untyped-def]
-            from aioresponses.core import CallbackResult
-
             captured["body"] = kwargs.get("json") or {}
             return CallbackResult(status=200, payload={"data": {"configureUps": True}})
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
-            m.post("http://192.168.1.100/graphql", callback=capture)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
+            m.post("http://unraid.test/graphql", callback=capture)
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -6969,10 +6943,10 @@ class TestNetworkMetrics:
     async def test_get_network_metrics_returns_models(self) -> None:
         from unraid_api.models import NetworkMetrics
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "metrics": {
@@ -7009,7 +6983,7 @@ class TestNetworkMetrics:
                 },
             )
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -7034,14 +7008,14 @@ class TestNetworkMetrics:
                 assert br0.transmitDropped == 6
 
     async def test_get_network_metrics_empty(self) -> None:
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"metrics": {"network": []}}},
             )
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -7054,7 +7028,7 @@ class TestNetworkMetrics:
         """Older servers without Metrics.network raise UnraidAPIError."""
         from unraid_api.capabilities import ServerCapabilities
 
-        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client = UnraidClient("unraid.test", "test-key", verify_ssl=False)
         client._capabilities = ServerCapabilities.from_introspection_response(
             {
                 # Query.metrics exists, but Metrics lacks the network field —
@@ -7073,19 +7047,17 @@ class TestNetworkMetrics:
         async def capture(url, **kwargs):  # type: ignore[no-untyped-def]
             body = kwargs.get("json") or {}
             captured_requests.append(body.get("query", ""))
-            from aioresponses.core import CallbackResult
-
             return CallbackResult(
                 status=200,
                 payload={"data": {"metrics": {"network": []}}},
             )
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
-            m.post("http://192.168.1.100/graphql", callback=capture)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
+            m.post("http://unraid.test/graphql", callback=capture)
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -7122,7 +7094,7 @@ class TestSubscribeNetworkMetrics:
         from unraid_api.capabilities import ServerCapabilities
         from unraid_api.models import NetworkMetrics
 
-        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client = UnraidClient("unraid.test", "test-key", verify_ssl=False)
         client._capabilities = ServerCapabilities.permissive()
 
         async def fake_subscribe(subscription, variables=None):  # type: ignore[no-untyped-def]
@@ -7163,7 +7135,7 @@ class TestSubscribeNetworkMetrics:
     async def test_subscribe_network_metrics_handles_missing_payload(self) -> None:
         from unraid_api.capabilities import ServerCapabilities
 
-        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client = UnraidClient("unraid.test", "test-key", verify_ssl=False)
         client._capabilities = ServerCapabilities.permissive()
 
         async def fake_subscribe(subscription, variables=None):  # type: ignore[no-untyped-def]
@@ -7177,7 +7149,7 @@ class TestSubscribeNetworkMetrics:
     async def test_subscribe_network_metrics_errors_when_missing(self) -> None:
         from unraid_api.capabilities import ServerCapabilities
 
-        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client = UnraidClient("unraid.test", "test-key", verify_ssl=False)
         client._capabilities = ServerCapabilities.from_introspection_response(
             {"Subscription": {"name": "Subscription", "fields": [{"name": "logFile"}]}}
         )
@@ -7189,10 +7161,10 @@ class TestDockerBulkUpdateMethods:
     """Tests for updateAllContainers/updateContainers/refreshDockerDigests."""
 
     async def test_update_all_containers(self) -> None:
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={
                     "data": {
                         "docker": {
@@ -7216,7 +7188,7 @@ class TestDockerBulkUpdateMethods:
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -7230,7 +7202,7 @@ class TestDockerBulkUpdateMethods:
     async def test_update_all_containers_errors_when_missing(self) -> None:
         from unraid_api.capabilities import ServerCapabilities
 
-        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client = UnraidClient("unraid.test", "test-key", verify_ssl=False)
         client._capabilities = ServerCapabilities.from_introspection_response(
             {
                 "DockerMutations": {
@@ -7246,8 +7218,6 @@ class TestDockerBulkUpdateMethods:
         captured: dict[str, object] = {}
 
         async def capture(url, **kwargs):  # type: ignore[no-untyped-def]
-            from aioresponses.core import CallbackResult
-
             captured["body"] = kwargs.get("json") or {}
             return CallbackResult(
                 status=200,
@@ -7267,12 +7237,12 @@ class TestDockerBulkUpdateMethods:
                 },
             )
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
-            m.post("http://192.168.1.100/graphql", callback=capture)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
+            m.post("http://unraid.test/graphql", callback=capture)
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -7289,7 +7259,7 @@ class TestDockerBulkUpdateMethods:
     async def test_update_containers_rejects_empty_list(self) -> None:
         from unraid_api.capabilities import ServerCapabilities
 
-        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client = UnraidClient("unraid.test", "test-key", verify_ssl=False)
         client._capabilities = ServerCapabilities.permissive()
         with pytest.raises(ValueError, match="container_ids"):
             await client.update_containers([])
@@ -7297,7 +7267,7 @@ class TestDockerBulkUpdateMethods:
     async def test_update_containers_rejects_blank_ids(self) -> None:
         from unraid_api.capabilities import ServerCapabilities
 
-        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client = UnraidClient("unraid.test", "test-key", verify_ssl=False)
         client._capabilities = ServerCapabilities.permissive()
         with pytest.raises(ValueError, match="container_ids"):
             await client.update_containers(["container:abc123", "  "])
@@ -7306,20 +7276,18 @@ class TestDockerBulkUpdateMethods:
         captured: dict[str, object] = {}
 
         async def capture(url, **kwargs):  # type: ignore[no-untyped-def]
-            from aioresponses.core import CallbackResult
-
             captured["body"] = kwargs.get("json") or {}
             return CallbackResult(
                 status=200,
                 payload={"data": {"docker": {"updateContainers": []}}},
             )
 
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
-            m.post("http://192.168.1.100/graphql", callback=capture)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
+            m.post("http://unraid.test/graphql", callback=capture)
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -7335,7 +7303,7 @@ class TestDockerBulkUpdateMethods:
     async def test_update_containers_errors_when_missing(self) -> None:
         from unraid_api.capabilities import ServerCapabilities
 
-        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client = UnraidClient("unraid.test", "test-key", verify_ssl=False)
         client._capabilities = ServerCapabilities.from_introspection_response(
             {
                 "DockerMutations": {
@@ -7348,15 +7316,15 @@ class TestDockerBulkUpdateMethods:
             await client.update_containers(["container:abc123"])
 
     async def test_refresh_docker_digests(self) -> None:
-        with aioresponses() as m:
-            m.get("http://192.168.1.100/graphql", status=400)
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
             m.post(
-                "http://192.168.1.100/graphql",
+                "http://unraid.test/graphql",
                 payload={"data": {"refreshDockerDigests": True}},
             )
 
             async with UnraidClient(
-                "192.168.1.100", "test-key", verify_ssl=False
+                "unraid.test", "test-key", verify_ssl=False
             ) as client:
                 from unraid_api.capabilities import ServerCapabilities
 
@@ -7368,7 +7336,7 @@ class TestDockerBulkUpdateMethods:
     async def test_refresh_docker_digests_errors_when_missing(self) -> None:
         from unraid_api.capabilities import ServerCapabilities
 
-        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client = UnraidClient("unraid.test", "test-key", verify_ssl=False)
         client._capabilities = ServerCapabilities.from_introspection_response(
             {"Mutation": {"name": "Mutation", "fields": [{"name": "archiveAll"}]}}
         )

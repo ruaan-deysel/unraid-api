@@ -202,18 +202,12 @@ python scripts/unraid-api-client.py --all
 
 ## Dependencies
 
-Core: `aiohttp>=3.9.0,<3.14.0` (temporary constraint), `pydantic>=2.0.0`
-Dev: `pytest`, `pytest-asyncio`, `pytest-cov`, `aioresponses`, `ruff`, `mypy`
+Core: `aiohttp>=3.9.0`, `pydantic>=2.0.0`
+Dev: `pytest`, `pytest-asyncio`, `pytest-cov`, `aiointercept`, `ruff`, `mypy`
 
 ### Dependency Notes
 
-**aiohttp<3.14.0 Constraint**: aiohttp 3.14.0 introduced a breaking change to `ClientResponse.__init__()` requiring a `stream_writer` parameter. The testing library `aioresponses` hasn't been updated to support this. We maintain this constraint until:
-1. aioresponses releases an update supporting aiohttp 3.14.0+, OR
-2. We migrate to `aiointercept` (the aiohttp-recommended replacement)
-
-**Future Migration**: The long-term plan is to migrate from `aioresponses` to `aiointercept` (https://github.com/paulloz/aiointercept), which is:
-- Actively maintained and compatible with aiohttp 3.14.0+
-- Recommended by aiohttp core maintainers
-- Planned to be integrated as an official aiohttp library
-
-This migration will require refactoring test code but will future-proof the project against aiohttp updates.
+**aiointercept (test mocking)**: Tests mock aiohttp requests with `aiointercept` (https://github.com/Polandia94/aiointercept), which routes requests through a real local aiohttp.web test server via DNS-resolver patching. It replaced `aioresponses` (incompatible with aiohttp 3.14.0's `ClientResponse.__init__()` change), removing the previous `aiohttp<3.14.0` constraint. Migration notes:
+- Test URLs must use hostnames (e.g. `unraid.test`), never bare IPs — DNS patching cannot intercept IP literals.
+- Use `async with aiointercept(mock_external_urls=True) as m:` (async context manager).
+- `exception=True` closes the connection so the client sees `ClientConnectionError`; tests that need a specific exception type (TimeoutError, SSL errors, ClientResponseError) patch the client session directly with `unittest.mock.patch.object(client._session, "post", side_effect=...)`.

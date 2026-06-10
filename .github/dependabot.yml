@@ -15,7 +15,7 @@ updates:
           - "ruff"
           - "mypy"
           - "pre-commit"
-          - "aioresponses"
+          - "aiointercept"
     labels:
       - "dependencies"
       - "security"
