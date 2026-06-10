@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from unittest.mock import AsyncMock, MagicMock
 
 import aiohttp
@@ -2836,6 +2837,294 @@ class TestTypedGetContainersMethod:
         assert container.labels == payload_labels
         assert container.networkSettings == payload_network_settings
         assert container.mounts == payload_mounts
+
+
+class TestTypedGetContainersSafeMethod:
+    """Tests for typed_get_containers_safe (lightweight polling variant)."""
+
+    async def test_typed_get_containers_safe(self) -> None:
+        """Safe variant returns DockerContainer models with cheap fields."""
+        from unraid_api.models import DockerContainer
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "docker": {
+                            "containers": [
+                                {
+                                    "id": "container:abc123",
+                                    "names": ["/plex"],
+                                    "image": "plexinc/pms-docker",
+                                    "imageId": "sha256:aaa",
+                                    "state": "running",
+                                    "status": "Up 5 days",
+                                    "autoStart": True,
+                                    "autoStartOrder": 1,
+                                    "isUpdateAvailable": False,
+                                    "iconUrl": "/icons/plex.png",
+                                    "webUiUrl": "http://192.168.1.100:32400",
+                                    "projectUrl": "https://plex.tv",
+                                    "registryUrl": "https://hub.docker.com",
+                                    "supportUrl": "https://forums.plex.tv",
+                                    "tailscaleEnabled": False,
+                                },
+                                {
+                                    "id": "container:def456",
+                                    "names": ["/sonarr"],
+                                    "image": "linuxserver/sonarr",
+                                    "imageId": "sha256:bbb",
+                                    "state": "stopped",
+                                    "status": "Exited (0) 2 hours ago",
+                                    "autoStart": False,
+                                },
+                            ]
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                result = await client.typed_get_containers_safe()
+
+                assert isinstance(result, list)
+                assert len(result) == 2
+                assert all(isinstance(c, DockerContainer) for c in result)
+                assert result[0].id == "container:abc123"
+                assert result[0].name == "plex"
+                assert result[0].state == "running"
+                assert result[0].isUpdateAvailable is False
+                assert result[0].iconUrl == "/icons/plex.png"
+                assert result[0].webUiUrl == "http://192.168.1.100:32400"
+                assert result[0].tailscaleEnabled is False
+                assert result[1].name == "sonarr"
+                assert result[1].state == "stopped"
+
+    async def test_typed_get_containers_safe_empty(self) -> None:
+        """Safe variant returns empty list when no containers exist."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={"data": {"docker": {"containers": []}}},
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                result = await client.typed_get_containers_safe()
+
+                assert isinstance(result, list)
+                assert len(result) == 0
+
+    async def test_typed_get_containers_safe_expensive_fields_none(self) -> None:
+        """Expensive fields stay None because the safe query never asks for them."""
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "docker": {
+                            "containers": [
+                                {
+                                    "id": "container:abc123",
+                                    "names": ["/plex"],
+                                    "image": "plexinc/pms-docker",
+                                    "state": "running",
+                                    "status": "Up 5 days",
+                                    "autoStart": True,
+                                },
+                            ]
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                result = await client.typed_get_containers_safe()
+
+                container = result[0]
+                assert container.sizeRootFs is None
+                assert container.sizeRw is None
+                assert container.sizeLog is None
+                assert container.mounts is None
+                assert container.networkSettings is None
+                assert container.labels is None
+                assert container.tailscaleStatus is None
+
+    async def test_typed_get_containers_safe_query_omits_expensive_fields(
+        self,
+    ) -> None:
+        """The generated query must omit every expensive/heavy field.
+
+        sizeRootFs/sizeRw/sizeLog make the Docker daemon compute writable
+        layer sizes (docker ps --size) which causes multi-second CPU spikes
+        on every poll (ha-unraid#237).
+        """
+        captured_requests: list[str] = []
+
+        async def capture(url, **kwargs):  # type: ignore[no-untyped-def]
+            body = kwargs.get("json") or {}
+            captured_requests.append(body.get("query", ""))
+            from aioresponses.core import CallbackResult
+
+            return CallbackResult(
+                status=200,
+                payload={
+                    "data": {
+                        "docker": {
+                            "containers": [
+                                {
+                                    "id": "container:abc",
+                                    "names": ["/plex"],
+                                    "image": "plexinc/pms-docker",
+                                    "state": "running",
+                                    "status": "Up 5 days",
+                                    "autoStart": True,
+                                },
+                            ]
+                        }
+                    }
+                },
+            )
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post("http://192.168.1.100/graphql", callback=capture)
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                await client.typed_get_containers_safe()
+
+        assert captured_requests, "no GraphQL request was captured"
+        query = captured_requests[0]
+
+        for needed in (
+            "id",
+            "names",
+            "image",
+            "imageId",
+            "state",
+            "status",
+            "autoStart",
+            "autoStartOrder",
+            "isUpdateAvailable",
+            "iconUrl",
+            "webUiUrl",
+            "projectUrl",
+            "registryUrl",
+            "supportUrl",
+            "tailscaleEnabled",
+        ):
+            assert re.search(rf"\b{needed}\b", query), f"{needed} not in query"
+
+        for excluded in (
+            "sizeRootFs",
+            "sizeRw",
+            "sizeLog",
+            "mounts",
+            "networkSettings",
+            "labels",
+            "ports",
+            "templatePorts",
+            "hostConfig",
+            "tailscaleStatus",
+        ):
+            assert not re.search(
+                rf"\b{excluded}\b", query
+            ), f"expensive field {excluded} must not be in safe query"
+
+    async def test_typed_get_containers_safe_capability_gating(self) -> None:
+        """Optional cheap scalars are omitted when the server lacks them."""
+        captured_requests: list[str] = []
+
+        async def capture(url, **kwargs):  # type: ignore[no-untyped-def]
+            body = kwargs.get("json") or {}
+            captured_requests.append(body.get("query", ""))
+            from aioresponses.core import CallbackResult
+
+            return CallbackResult(
+                status=200,
+                payload={
+                    "data": {
+                        "docker": {
+                            "containers": [
+                                {
+                                    "id": "container:abc",
+                                    "names": ["/plex"],
+                                    "image": "plexinc/pms-docker",
+                                    "state": "running",
+                                    "status": "Up 5 days",
+                                    "autoStart": True,
+                                },
+                            ]
+                        }
+                    }
+                },
+            )
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post("http://192.168.1.100/graphql", callback=capture)
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                # Old server: only core container fields exist.
+                client._capabilities = ServerCapabilities(
+                    {
+                        "DockerContainer": frozenset(
+                            {
+                                "id",
+                                "names",
+                                "image",
+                                "imageId",
+                                "state",
+                                "status",
+                                "autoStart",
+                                "iconUrl",
+                            }
+                        )
+                    }
+                )
+                result = await client.typed_get_containers_safe()
+
+        assert len(result) == 1
+        assert captured_requests, "no GraphQL request was captured"
+        query = captured_requests[0]
+        assert "iconUrl" in query
+        for missing in (
+            "autoStartOrder",
+            "isUpdateAvailable",
+            "webUiUrl",
+            "projectUrl",
+            "registryUrl",
+            "supportUrl",
+            "tailscaleEnabled",
+        ):
+            assert missing not in query, f"{missing} should be capability-gated out"
 
 
 class TestTypedGetVmsMethod:
@@ -6667,3 +6956,421 @@ class TestSystemTimeAndUpsAllFields:
             "timeout": 30,
             "killUps": "YES",
         }
+
+
+# =============================================================================
+# API 4.35.0 additions
+# =============================================================================
+
+
+class TestNetworkMetrics:
+    """Tests for get_network_metrics (metrics.network, API 4.35.0+)."""
+
+    async def test_get_network_metrics_returns_models(self) -> None:
+        from unraid_api.models import NetworkMetrics
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "metrics": {
+                            "network": [
+                                {
+                                    "id": "server:metrics/network/br0",
+                                    "name": "br0",
+                                    "rxSec": 9474.57,
+                                    "txSec": 30745.68,
+                                    "operstate": "up",
+                                    "bytesReceived": 383537817199,
+                                    "bytesSent": 61471810463,
+                                    "packetsReceived": 172645744,
+                                    "packetsSent": 42097920,
+                                    "receiveErrors": 0,
+                                    "transmitErrors": 0,
+                                    "receiveDropped": 3771,
+                                    "transmitDropped": 6,
+                                },
+                                {
+                                    "id": "server:metrics/network/lo",
+                                    "name": "lo",
+                                    "rxSec": 542.83,
+                                    "txSec": 542.83,
+                                    "operstate": "unknown",
+                                    "bytesReceived": 733407314,
+                                    "bytesSent": 733407314,
+                                    "packetsReceived": 5614820,
+                                    "packetsSent": 5614820,
+                                },
+                            ]
+                        }
+                    }
+                },
+            )
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                result = await client.get_network_metrics()
+
+                assert isinstance(result, list)
+                assert len(result) == 2
+                assert all(isinstance(n, NetworkMetrics) for n in result)
+                br0 = result[0]
+                assert br0.name == "br0"
+                assert br0.operstate == "up"
+                assert br0.rxSec == 9474.57
+                assert br0.txSec == 30745.68
+                assert br0.bytesReceived == 383537817199
+                assert br0.bytesSent == 61471810463
+                assert br0.packetsReceived == 172645744
+                assert br0.packetsSent == 42097920
+                assert br0.receiveErrors == 0
+                assert br0.transmitErrors == 0
+                assert br0.receiveDropped == 3771
+                assert br0.transmitDropped == 6
+
+    async def test_get_network_metrics_empty(self) -> None:
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={"data": {"metrics": {"network": []}}},
+            )
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                result = await client.get_network_metrics()
+
+                assert result == []
+
+    async def test_get_network_metrics_errors_when_missing(self) -> None:
+        """Older servers without Metrics.network raise UnraidAPIError."""
+        from unraid_api.capabilities import ServerCapabilities
+
+        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client._capabilities = ServerCapabilities.from_introspection_response(
+            {
+                # Query.metrics exists, but Metrics lacks the network field —
+                # the gate must check Metrics.network specifically.
+                "Query": {"name": "Query", "fields": [{"name": "metrics"}]},
+                "Metrics": {"name": "Metrics", "fields": [{"name": "cpu"}]},
+            }
+        )
+        with pytest.raises(UnraidAPIError, match=r"[Nn]etwork metrics"):
+            await client.get_network_metrics()
+
+    async def test_get_network_metrics_query_shape(self) -> None:
+        """Query must target metrics.network with the 4.35.0 field set."""
+        captured_requests: list[str] = []
+
+        async def capture(url, **kwargs):  # type: ignore[no-untyped-def]
+            body = kwargs.get("json") or {}
+            captured_requests.append(body.get("query", ""))
+            from aioresponses.core import CallbackResult
+
+            return CallbackResult(
+                status=200,
+                payload={"data": {"metrics": {"network": []}}},
+            )
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post("http://192.168.1.100/graphql", callback=capture)
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                await client.get_network_metrics()
+
+        assert captured_requests, "no GraphQL request was captured"
+        query = captured_requests[0]
+        assert re.search(
+            r"\bmetrics\b\s*\{\s*\bnetwork\b\s*\{", query
+        ), "query must target metrics.network"
+        for needed in (
+            "id",
+            "name",
+            "rxSec",
+            "txSec",
+            "operstate",
+            "bytesReceived",
+            "bytesSent",
+            "packetsReceived",
+            "packetsSent",
+            "receiveErrors",
+            "transmitErrors",
+            "receiveDropped",
+            "transmitDropped",
+        ):
+            assert needed in query, f"{needed} not in query"
+
+
+class TestSubscribeNetworkMetrics:
+    """Tests for the systemMetricsNetwork subscription wrapper (4.35.0)."""
+
+    async def test_subscribe_network_metrics_yields_models(self) -> None:
+        from unraid_api.capabilities import ServerCapabilities
+        from unraid_api.models import NetworkMetrics
+
+        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client._capabilities = ServerCapabilities.permissive()
+
+        async def fake_subscribe(subscription, variables=None):  # type: ignore[no-untyped-def]
+            assert "systemMetricsNetwork" in subscription
+            yield {
+                "systemMetricsNetwork": [
+                    {
+                        "id": "server:metrics/network/br0",
+                        "name": "br0",
+                        "rxSec": 1000.0,
+                        "txSec": 2000.0,
+                        "operstate": "up",
+                        "bytesReceived": 100,
+                        "bytesSent": 200,
+                    },
+                    {
+                        "id": "server:metrics/network/eth0",
+                        "name": "eth0",
+                        "rxSec": 0.0,
+                        "txSec": 0.0,
+                        "operstate": "down",
+                    },
+                ]
+            }
+
+        client.subscribe = fake_subscribe  # type: ignore[assignment]
+
+        results = [n async for n in client.subscribe_network_metrics()]
+        assert len(results) == 1
+        interfaces = results[0]
+        assert isinstance(interfaces, list)
+        assert len(interfaces) == 2
+        assert all(isinstance(i, NetworkMetrics) for i in interfaces)
+        assert interfaces[0].name == "br0"
+        assert interfaces[0].rxSec == 1000.0
+        assert interfaces[1].operstate == "down"
+
+    async def test_subscribe_network_metrics_handles_missing_payload(self) -> None:
+        from unraid_api.capabilities import ServerCapabilities
+
+        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client._capabilities = ServerCapabilities.permissive()
+
+        async def fake_subscribe(subscription, variables=None):  # type: ignore[no-untyped-def]
+            yield {}  # event without a systemMetricsNetwork key
+
+        client.subscribe = fake_subscribe  # type: ignore[assignment]
+
+        results = [n async for n in client.subscribe_network_metrics()]
+        assert results == [[]]
+
+    async def test_subscribe_network_metrics_errors_when_missing(self) -> None:
+        from unraid_api.capabilities import ServerCapabilities
+
+        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client._capabilities = ServerCapabilities.from_introspection_response(
+            {"Subscription": {"name": "Subscription", "fields": [{"name": "logFile"}]}}
+        )
+        with pytest.raises(UnraidAPIError, match="systemMetricsNetwork"):
+            _ = [n async for n in client.subscribe_network_metrics()]
+
+
+class TestDockerBulkUpdateMethods:
+    """Tests for updateAllContainers/updateContainers/refreshDockerDigests."""
+
+    async def test_update_all_containers(self) -> None:
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={
+                    "data": {
+                        "docker": {
+                            "updateAllContainers": [
+                                {
+                                    "id": "container:abc123",
+                                    "names": ["/plex"],
+                                    "image": "plex:latest",
+                                    "state": "running",
+                                },
+                                {
+                                    "id": "container:def456",
+                                    "names": ["/sonarr"],
+                                    "image": "sonarr:latest",
+                                    "state": "running",
+                                },
+                            ]
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                result = await client.update_all_containers()
+
+                updated = result["docker"]["updateAllContainers"]
+                assert len(updated) == 2
+                assert updated[0]["image"] == "plex:latest"
+
+    async def test_update_all_containers_errors_when_missing(self) -> None:
+        from unraid_api.capabilities import ServerCapabilities
+
+        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client._capabilities = ServerCapabilities.from_introspection_response(
+            {
+                "DockerMutations": {
+                    "name": "DockerMutations",
+                    "fields": [{"name": "start"}],
+                }
+            }
+        )
+        with pytest.raises(UnraidAPIError, match="updateAllContainers"):
+            await client.update_all_containers()
+
+    async def test_update_containers_passes_ids(self) -> None:
+        captured: dict[str, object] = {}
+
+        async def capture(url, **kwargs):  # type: ignore[no-untyped-def]
+            from aioresponses.core import CallbackResult
+
+            captured["body"] = kwargs.get("json") or {}
+            return CallbackResult(
+                status=200,
+                payload={
+                    "data": {
+                        "docker": {
+                            "updateContainers": [
+                                {
+                                    "id": "container:abc123",
+                                    "names": ["/plex"],
+                                    "image": "plex:latest",
+                                    "state": "running",
+                                },
+                            ]
+                        }
+                    }
+                },
+            )
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post("http://192.168.1.100/graphql", callback=capture)
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                result = await client.update_containers(["container:abc123"])
+
+                updated = result["docker"]["updateContainers"]
+                assert len(updated) == 1
+
+        body = captured["body"]
+        assert isinstance(body, dict)
+        assert body["variables"] == {"ids": ["container:abc123"]}
+
+    async def test_update_containers_rejects_empty_list(self) -> None:
+        from unraid_api.capabilities import ServerCapabilities
+
+        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client._capabilities = ServerCapabilities.permissive()
+        with pytest.raises(ValueError, match="container_ids"):
+            await client.update_containers([])
+
+    async def test_update_containers_rejects_blank_ids(self) -> None:
+        from unraid_api.capabilities import ServerCapabilities
+
+        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client._capabilities = ServerCapabilities.permissive()
+        with pytest.raises(ValueError, match="container_ids"):
+            await client.update_containers(["container:abc123", "  "])
+
+    async def test_update_containers_trims_and_dedupes_ids(self) -> None:
+        captured: dict[str, object] = {}
+
+        async def capture(url, **kwargs):  # type: ignore[no-untyped-def]
+            from aioresponses.core import CallbackResult
+
+            captured["body"] = kwargs.get("json") or {}
+            return CallbackResult(
+                status=200,
+                payload={"data": {"docker": {"updateContainers": []}}},
+            )
+
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post("http://192.168.1.100/graphql", callback=capture)
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                await client.update_containers(
+                    [" container:abc123 ", "container:def456", "container:abc123"]
+                )
+
+        body = captured["body"]
+        assert isinstance(body, dict)
+        assert body["variables"] == {"ids": ["container:abc123", "container:def456"]}
+
+    async def test_update_containers_errors_when_missing(self) -> None:
+        from unraid_api.capabilities import ServerCapabilities
+
+        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client._capabilities = ServerCapabilities.from_introspection_response(
+            {
+                "DockerMutations": {
+                    "name": "DockerMutations",
+                    "fields": [{"name": "start"}],
+                }
+            }
+        )
+        with pytest.raises(UnraidAPIError, match="updateContainers"):
+            await client.update_containers(["container:abc123"])
+
+    async def test_refresh_docker_digests(self) -> None:
+        with aioresponses() as m:
+            m.get("http://192.168.1.100/graphql", status=400)
+            m.post(
+                "http://192.168.1.100/graphql",
+                payload={"data": {"refreshDockerDigests": True}},
+            )
+
+            async with UnraidClient(
+                "192.168.1.100", "test-key", verify_ssl=False
+            ) as client:
+                from unraid_api.capabilities import ServerCapabilities
+
+                client._capabilities = ServerCapabilities.permissive()
+                result = await client.refresh_docker_digests()
+
+                assert result is True
+
+    async def test_refresh_docker_digests_errors_when_missing(self) -> None:
+        from unraid_api.capabilities import ServerCapabilities
+
+        client = UnraidClient("192.168.1.100", "test-key", verify_ssl=False)
+        client._capabilities = ServerCapabilities.from_introspection_response(
+            {"Mutation": {"name": "Mutation", "fields": [{"name": "archiveAll"}]}}
+        )
+        with pytest.raises(UnraidAPIError, match="refreshDockerDigests"):
+            await client.refresh_docker_digests()

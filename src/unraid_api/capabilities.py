@@ -23,6 +23,8 @@ CAPABILITY_TYPES: tuple[str, ...] = (
     "Notification",
     "ParityCheck",
     "UnraidArray",
+    "Metrics",
+    "DockerMutations",
 )
 
 

@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-06-10
+
+### Added
+
+- **`typed_get_containers_safe()` method** — Lightweight variant of
+  `typed_get_containers()` for frequent polling. Omits fields that are
+  expensive for the server to resolve: `sizeRootFs`/`sizeRw`/`sizeLog` make
+  the Docker daemon compute writable-layer sizes (equivalent to
+  `docker ps --size`) and caused multi-second CPU spikes on every poll, plus
+  the heavy `mounts`/`networkSettings`/`labels` payloads and the
+  `ports`/`templatePorts`/`hostConfig`/`tailscaleStatus` subselections.
+  Validated against a live Unraid 7.3.1 server: 0.08 s vs 2.5 s for the full
+  query with 17 containers.
+  ([#69](https://github.com/ruaan-deysel/unraid-api/issues/69))
+- **Network metrics (API 4.35.0)** — `get_network_metrics()` returns
+  read-only per-interface throughput, packet, error, and dropped counters
+  (`metrics.network`); `subscribe_network_metrics()` streams the same data
+  over WebSocket (`systemMetricsNetwork`). New `NetworkMetrics` model
+  (public export). Both are capability-gated and raise a clean
+  `UnraidAPIError` on servers older than API 4.35.0.
+- **Bulk container updates** — `update_all_containers()` updates every
+  container with a pending image update (`docker.updateAllContainers`),
+  `update_containers(ids)` updates a selected set
+  (`docker.updateContainers`), and `refresh_docker_digests()` forces a
+  re-check of remote image digests — the WebGUI "check for updates" action
+  (`refreshDockerDigests`). All three are capability-gated.
+
 ## [1.11.0] - 2026-06-01
 
 ### Added

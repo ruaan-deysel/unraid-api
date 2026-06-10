@@ -45,6 +45,7 @@ if TYPE_CHECKING:
         LogFile,
         MemoryMetrics,
         Network,
+        NetworkMetrics,
         Notification,
         NotificationOverview,
         Owner,
@@ -1235,6 +1236,51 @@ class UnraidClient:
         temp_data = (result.get("metrics") or {}).get("temperature") or {}
         return TemperatureMetrics(**temp_data)
 
+    async def get_network_metrics(self) -> list[NetworkMetrics]:
+        """Get per-interface network metrics (API 4.35.0+).
+
+        Returns read-only throughput, packet, error, and dropped counters
+        for every network interface on the server (bridges, NICs, veth
+        pairs, loopback).
+
+        Returns:
+            List of NetworkMetrics models, one per interface.
+
+        Raises:
+            UnraidAPIError: If the server does not expose metrics.network
+                (Unraid API older than 4.35.0).
+
+        """
+        from unraid_api.models import NetworkMetrics
+
+        await self.get_capabilities()
+        self._require_capability("Network metrics query", "Metrics.network")
+
+        query_str = """
+            query {
+                metrics {
+                    network {
+                        id
+                        name
+                        rxSec
+                        txSec
+                        operstate
+                        bytesReceived
+                        bytesSent
+                        packetsReceived
+                        packetsSent
+                        receiveErrors
+                        transmitErrors
+                        receiveDropped
+                        transmitDropped
+                    }
+                }
+            }
+        """
+        result = await self.query(query_str)
+        interfaces = (result.get("metrics") or {}).get("network") or []
+        return [NetworkMetrics(**i) for i in interfaces]
+
     async def typed_get_containers(self) -> list[DockerContainer]:
         """Get all Docker containers as Pydantic models.
 
@@ -1348,6 +1394,81 @@ class UnraidClient:
                 ts_fields = ["online"]
             fragments.append("tailscaleStatus { " + " ".join(ts_fields) + " }")
 
+        indent = "                        "
+        body = ("\n" + indent).join(fragments)
+        return (
+            "query {\n"
+            "            docker {\n"
+            "                containers {\n"
+            f"                    {body}\n"
+            "                }\n"
+            "            }\n"
+            "        }"
+        )
+
+    async def typed_get_containers_safe(self) -> list[DockerContainer]:
+        """Get Docker containers WITHOUT expensive fields (safe for polling).
+
+        Identical to typed_get_containers() but omits fields that are
+        expensive for the server to resolve: sizeRootFs/sizeRw/sizeLog make
+        the Docker daemon compute writable-layer sizes (equivalent to
+        ``docker ps --size``), which causes multi-second CPU spikes on every
+        poll. Heavy payload fields (mounts, networkSettings, labels) and
+        nested selections (ports, templatePorts, hostConfig,
+        tailscaleStatus) are omitted as well. Use this method for frequent
+        polling (e.g. every 60 seconds).
+
+        Omitted fields are None in the returned models.
+
+        Returns:
+            List of DockerContainer models with only cheap scalar fields.
+
+        """
+        from unraid_api.models import DockerContainer
+
+        caps = await self.get_capabilities()
+        query_str = self._build_containers_query_safe(caps)
+        result = await self.query(query_str)
+        containers = result.get("docker", {}).get("containers", []) or []
+        return [DockerContainer.from_api_response(c) for c in containers]
+
+    def _build_containers_query_safe(self, caps: ServerCapabilities) -> str:
+        """Compose a lightweight docker.containers query from capabilities.
+
+        Requests only cheap scalar fields. Expensive fields (sizeRootFs,
+        sizeRw, sizeLog), heavy payloads (mounts, networkSettings, labels)
+        and nested selections (ports, templatePorts, hostConfig,
+        tailscaleStatus) are never included, regardless of capabilities.
+        """
+
+        def has(field: str) -> bool:
+            return caps.has(f"DockerContainer.{field}")
+
+        core = [
+            "id",
+            "names",
+            "image",
+            "imageId",
+            "state",
+            "status",
+            "autoStart",
+        ]
+        extended_scalar = [
+            f
+            for f in (
+                "autoStartOrder",
+                "isUpdateAvailable",
+                "iconUrl",
+                "webUiUrl",
+                "projectUrl",
+                "registryUrl",
+                "supportUrl",
+                "tailscaleEnabled",
+            )
+            if has(f)
+        ]
+
+        fragments = core + extended_scalar
         indent = "                        "
         body = ("\n" + indent).join(fragments)
         return (
@@ -1992,6 +2113,103 @@ class UnraidClient:
             }
         """
         return await self.mutate(mutation, {"id": container_id})
+
+    async def update_all_containers(self) -> dict[str, Any]:
+        """Update every container that has a pending image update.
+
+        Returns:
+            Mutation response data with the list of updated containers.
+
+        Raises:
+            UnraidAPIError: If the server does not expose
+                docker.updateAllContainers.
+
+        """
+        await self.get_capabilities()
+        self._require_capability(
+            "updateAllContainers mutation", "DockerMutations.updateAllContainers"
+        )
+
+        mutation = """
+            mutation UpdateAllContainers {
+                docker {
+                    updateAllContainers {
+                        id
+                        names
+                        image
+                        state
+                    }
+                }
+            }
+        """
+        return await self.mutate(mutation)
+
+    async def update_containers(self, container_ids: list[str]) -> dict[str, Any]:
+        """Update the given containers to their latest images.
+
+        Args:
+            container_ids: Container IDs to update.
+
+        Returns:
+            Mutation response data with the list of updated containers.
+
+        Raises:
+            ValueError: If container_ids is empty or contains blank IDs.
+            UnraidAPIError: If the server does not expose
+                docker.updateContainers.
+
+        """
+        cleaned = [i.strip() for i in container_ids]
+        if not cleaned or any(not i for i in cleaned):
+            raise ValueError("container_ids must be non-empty container IDs")
+        # Updating the same container twice in one call is meaningless.
+        deduped = list(dict.fromkeys(cleaned))
+
+        await self.get_capabilities()
+        self._require_capability(
+            "updateContainers mutation", "DockerMutations.updateContainers"
+        )
+
+        mutation = """
+            mutation UpdateContainers($ids: [PrefixedID!]!) {
+                docker {
+                    updateContainers(ids: $ids) {
+                        id
+                        names
+                        image
+                        state
+                    }
+                }
+            }
+        """
+        return await self.mutate(mutation, {"ids": deduped})
+
+    async def refresh_docker_digests(self) -> bool:
+        """Force a re-check of remote image digests for update detection.
+
+        Refreshes the update-available state of all containers (the
+        "check for updates" action in the WebGUI).
+
+        Returns:
+            True if the refresh was triggered successfully.
+
+        Raises:
+            UnraidAPIError: If the server does not expose
+                refreshDockerDigests.
+
+        """
+        await self.get_capabilities()
+        self._require_capability(
+            "refreshDockerDigests mutation", "Mutation.refreshDockerDigests"
+        )
+
+        mutation = """
+            mutation RefreshDockerDigests {
+                refreshDockerDigests
+            }
+        """
+        result = await self.mutate(mutation)
+        return bool(result.get("refreshDockerDigests"))
 
     async def get_containers(self) -> list[dict[str, Any]]:
         """Get all Docker containers.
@@ -3807,6 +4025,52 @@ class UnraidClient:
         async for data in self.subscribe(subscription):
             mem_data = data.get("systemMetricsMemory", {})
             yield MemoryMetrics(**mem_data)
+
+    async def subscribe_network_metrics(
+        self,
+    ) -> AsyncGenerator[list[NetworkMetrics], None]:
+        """Subscribe to live per-interface network metrics (API 4.35.0+).
+
+        Yields a list of NetworkMetrics models (one per interface) for
+        each update event.
+
+        Yields:
+            List of NetworkMetrics for each update event.
+
+        Raises:
+            UnraidAPIError: If the server does not expose the
+                systemMetricsNetwork subscription.
+
+        """
+        from unraid_api.models import NetworkMetrics
+
+        await self.get_capabilities()
+        self._require_capability(
+            "systemMetricsNetwork subscription", "Subscription.systemMetricsNetwork"
+        )
+
+        subscription = """
+            subscription {
+                systemMetricsNetwork {
+                    id
+                    name
+                    rxSec
+                    txSec
+                    operstate
+                    bytesReceived
+                    bytesSent
+                    packetsReceived
+                    packetsSent
+                    receiveErrors
+                    transmitErrors
+                    receiveDropped
+                    transmitDropped
+                }
+            }
+        """
+        async for data in self.subscribe(subscription):
+            interfaces = data.get("systemMetricsNetwork") or []
+            yield [NetworkMetrics(**i) for i in interfaces]
 
     async def subscribe_temperature_metrics(
         self,

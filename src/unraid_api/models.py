@@ -2039,6 +2039,46 @@ class TimeZoneOption(UnraidBaseModel):
 
 
 # =============================================================================
+# Network Metrics Models (API 4.35.0)
+# =============================================================================
+
+
+class NetworkMetrics(UnraidBaseModel):
+    """Per-interface network metrics (metrics.network, API 4.35.0+).
+
+    Attributes:
+        id: Prefixed metric identifier.
+        name: Interface name (e.g., "br0", "eth0", "lo").
+        rxSec: Receive rate in bytes per second.
+        txSec: Transmit rate in bytes per second.
+        operstate: Interface operational state (e.g., "up", "down", "unknown").
+        bytesReceived: Total bytes received since boot.
+        bytesSent: Total bytes sent since boot.
+        packetsReceived: Total packets received since boot.
+        packetsSent: Total packets sent since boot.
+        receiveErrors: Total receive errors since boot.
+        transmitErrors: Total transmit errors since boot.
+        receiveDropped: Total received packets dropped since boot.
+        transmitDropped: Total transmitted packets dropped since boot.
+
+    """
+
+    id: str | None = None
+    name: str | None = None
+    rxSec: float | None = None
+    txSec: float | None = None
+    operstate: str | None = None
+    bytesReceived: int | None = None
+    bytesSent: int | None = None
+    packetsReceived: int | None = None
+    packetsSent: int | None = None
+    receiveErrors: int | None = None
+    transmitErrors: int | None = None
+    receiveDropped: int | None = None
+    transmitDropped: int | None = None
+
+
+# =============================================================================
 # Settings Models (Unraid 7.3 / API 4.3x)
 # =============================================================================
 

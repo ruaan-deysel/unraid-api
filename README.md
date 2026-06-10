@@ -200,6 +200,7 @@ async with UnraidClient(host, api_key) as client:
 | `get_system_metrics_safe()` | `SystemMetrics` | Same as above but omits temperature sensors to avoid waking sleeping disks |
 | `typed_get_array()` | `UnraidArray` | Array state, capacity, disks |
 | `typed_get_containers()` | `list[DockerContainer]` | All Docker containers |
+| `typed_get_containers_safe()` | `list[DockerContainer]` | Same as above but omits expensive fields (container sizes, mounts, network settings) — use for frequent polling |
 | `typed_get_vms()` | `list[VmDomain]` | All virtual machines |
 | `typed_get_ups_devices()` | `list[UPSDevice]` | UPS devices with battery info |
 | `typed_get_shares()` | `list[Share]` | User shares with usage |
@@ -220,6 +221,7 @@ async with UnraidClient(host, api_key) as client:
 | `get_display_settings()` | `DisplaySettings` | Display and temperature settings |
 | `get_docker_port_conflicts()` | `DockerPortConflicts` | Docker LAN port conflicts |
 | `get_temperature_metrics()` | `TemperatureMetrics` | Temperature sensors, thresholds, summary |
+| `get_network_metrics()` | `list[NetworkMetrics]` | Per-interface network throughput, packet, error counters (API 4.35.0+) |
 
 #### Raw Data Methods
 
@@ -259,6 +261,10 @@ async with UnraidClient(host, api_key) as client:
 | `cancel_parity_check()` | Cancel parity check |
 | `spin_up_disk(id)` | Spin up disk |
 | `spin_down_disk(id)` | Spin down disk |
+| `update_container(id)` | Update container to latest image |
+| `update_containers(ids)` | Update selected containers (API 4.35.0+) |
+| `update_all_containers()` | Update every container with a pending update (API 4.35.0+) |
+| `refresh_docker_digests()` | Re-check remote image digests ("check for updates", API 4.35.0+) |
 
 #### Subscription Methods (WebSocket)
 
@@ -272,6 +278,7 @@ async with UnraidClient(host, api_key) as client:
 | `subscribe_ups_updates()` | `dict` | UPS state changes (raw) |
 | `subscribe_array_updates()` | `ArraySubscriptionUpdate` | Array state and capacity changes |
 | `subscribe_temperature_metrics()` | `TemperatureMetrics` | Temperature sensor updates |
+| `subscribe_network_metrics()` | `list[NetworkMetrics]` | Per-interface network metrics (API 4.35.0+) |
 
 ### Models
 
