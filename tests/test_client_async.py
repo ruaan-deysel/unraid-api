@@ -3050,9 +3050,9 @@ class TestTypedGetContainersSafeMethod:
             "hostConfig",
             "tailscaleStatus",
         ):
-            assert not re.search(
-                rf"\b{excluded}\b", query
-            ), f"expensive field {excluded} must not be in safe query"
+            assert not re.search(rf"\b{excluded}\b", query), (
+                f"expensive field {excluded} must not be in safe query"
+            )
 
     async def test_typed_get_containers_safe_capability_gating(self) -> None:
         """Optional cheap scalars are omitted when the server lacks them."""
@@ -7094,9 +7094,9 @@ class TestNetworkMetrics:
 
         assert captured_requests, "no GraphQL request was captured"
         query = captured_requests[0]
-        assert re.search(
-            r"\bmetrics\b\s*\{\s*\bnetwork\b\s*\{", query
-        ), "query must target metrics.network"
+        assert re.search(r"\bmetrics\b\s*\{\s*\bnetwork\b\s*\{", query), (
+            "query must target metrics.network"
+        )
         for needed in (
             "id",
             "name",
