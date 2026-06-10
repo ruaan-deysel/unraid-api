@@ -202,5 +202,18 @@ python scripts/unraid-api-client.py --all
 
 ## Dependencies
 
-Core: `aiohttp>=3.9.0`, `pydantic>=2.0.0`
+Core: `aiohttp>=3.9.0,<3.14.0` (temporary constraint), `pydantic>=2.0.0`
 Dev: `pytest`, `pytest-asyncio`, `pytest-cov`, `aioresponses`, `ruff`, `mypy`
+
+### Dependency Notes
+
+**aiohttp<3.14.0 Constraint**: aiohttp 3.14.0 introduced a breaking change to `ClientResponse.__init__()` requiring a `stream_writer` parameter. The testing library `aioresponses` hasn't been updated to support this. We maintain this constraint until:
+1. aioresponses releases an update supporting aiohttp 3.14.0+, OR
+2. We migrate to `aiointercept` (the aiohttp-recommended replacement)
+
+**Future Migration**: The long-term plan is to migrate from `aioresponses` to `aiointercept` (https://github.com/paulloz/aiointercept), which is:
+- Actively maintained and compatible with aiohttp 3.14.0+
+- Recommended by aiohttp core maintainers
+- Planned to be integrated as an official aiohttp library
+
+This migration will require refactoring test code but will future-proof the project against aiohttp updates.
