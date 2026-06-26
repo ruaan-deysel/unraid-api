@@ -1183,6 +1183,61 @@ class TestDockerContainerExtendedFields:
         assert container.hostConfig.networkMode == "host"
 
 
+class TestDockerContainerStatsSanitization:
+    """Tests for ANSI escape-sequence stripping in DockerContainerStats (#71)."""
+
+    def test_id_strips_ansi_escape_sequences(self) -> None:
+        """The clear-screen/cursor-home escapes glued onto the first row's id
+        are removed, recovering the valid PrefixedID."""
+        from unraid_api.models import DockerContainerStats
+
+        # Real-world corruption: the PrefixedID prefix (``<prefix>:``) is intact
+        # but ``\x1b[J\x1b[H`` is injected before the actual container id.
+        corrupted = (
+            "341df820ea490:\x1b[J\x1b[H"
+            "25d9c2630a90520ed9d9f6b2366c3d5a3517f3efd3b5e260823081f0dbdf43cb"
+        )
+        stats = DockerContainerStats(id=corrupted)
+
+        assert stats.id == (
+            "341df820ea490:"
+            "25d9c2630a90520ed9d9f6b2366c3d5a3517f3efd3b5e260823081f0dbdf43cb"
+        )
+        assert "\x1b" not in stats.id
+
+    def test_clean_id_passes_through_unchanged(self) -> None:
+        """An id with no escape sequences is returned verbatim."""
+        from unraid_api.models import DockerContainerStats
+
+        clean = "341df820ea490:f3f490ce40ec797acac2d42730a94d890eb0f811718905a6"
+        stats = DockerContainerStats(id=clean)
+
+        assert stats.id == clean
+
+    def test_none_id_stays_none(self) -> None:
+        """An explicit null id (as the API may send) passes through as None."""
+        from unraid_api.models import DockerContainerStats
+
+        stats = DockerContainerStats(id=None, cpuPercent=12.5)
+
+        assert stats.id is None
+
+    def test_other_string_fields_are_sanitized(self) -> None:
+        """Escape sequences are stripped from all string fields, not just id."""
+        from unraid_api.models import DockerContainerStats
+
+        stats = DockerContainerStats(
+            id="container:abc",
+            memUsage="\x1b[H512MB / 2GB",
+            netIO="100MB / 50MB\x1b[J",
+            blockIO="10MB / 5MB",
+        )
+
+        assert stats.memUsage == "512MB / 2GB"
+        assert stats.netIO == "100MB / 50MB"
+        assert stats.blockIO == "10MB / 5MB"
+
+
 class TestUPSExtendedFields:
     """Tests for UPS model extended fields."""
 

@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.1] - 2026-06-26
+
+### Fixed
+
+- **ANSI escape codes corrupting `DockerContainerStats` IDs** — The Unraid
+  backend streams raw `docker stats` terminal output for the
+  `dockerContainerStats` subscription, and the first row of every sample cycle
+  carries clear-screen/cursor-home escapes (`\x1b[J\x1b[H`) glued onto the
+  field right after the `PrefixedID` prefix. Because `docker stats` output
+  order is stable, the same container was corrupted on every cycle, so its
+  `id` never matched the IDs from `typed_get_containers()` — leaving that
+  container's stats permanently unresolved for consumers (e.g. one container's
+  CPU/memory sensors stuck "Unknown" in ha-unraid). `DockerContainerStats`
+  string fields now strip ANSI CSI sequences on construction, so all consumers
+  receive clean values regardless of how the model is built. Verified against a
+  live server: round-tripping the corruption through all 8 real container IDs
+  recovers the original, server-matching IDs.
+  ([#71](https://github.com/ruaan-deysel/unraid-api/issues/71))
+
 ## [1.12.0] - 2026-06-10
 
 ### Added

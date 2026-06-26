@@ -450,6 +450,38 @@ class TestTypedSubscriptions:
         assert results[0].memUsage == "512MB / 2GB"
         assert results[0].netIO == "100MB / 50MB"
 
+    async def test_subscribe_container_stats_strips_ansi_from_id(
+        self, ws_client: UnraidClient
+    ) -> None:
+        """The first row of each docker stats cycle glues clear-screen/
+        cursor-home escapes onto the id; the yielded model must be clean (#71)."""
+        ack = _ws_text_msg({"type": "connection_ack"})
+        next_msg = _ws_text_msg(
+            {
+                "id": "test",
+                "type": "next",
+                "payload": {
+                    "data": {
+                        "dockerContainerStats": {
+                            "id": "container:\x1b[J\x1b[H25d9c2630a90520ed9d9f6b2",
+                            "cpuPercent": 1.0,
+                        }
+                    }
+                },
+            }
+        )
+        complete = _ws_text_msg({"id": "test", "type": "complete"})
+
+        ws = MockWebSocket([ack, next_msg, complete])
+        ws_client._session.ws_connect = AsyncMock(return_value=ws)  # type: ignore[union-attr]
+
+        results = []
+        async for stats in ws_client.subscribe_container_stats():
+            results.append(stats)
+
+        assert results[0].id == "container:25d9c2630a90520ed9d9f6b2"
+        assert "\x1b" not in (results[0].id or "")
+
     async def test_subscribe_cpu_metrics(self, ws_client: UnraidClient) -> None:
         """Test subscribe_cpu_metrics yields CpuMetrics."""
         from unraid_api.models import CpuMetrics

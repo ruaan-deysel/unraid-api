@@ -38,6 +38,36 @@ def _parse_datetime(value: str | datetime | None) -> datetime | None:
 ParsedDatetime = Annotated[datetime | None, BeforeValidator(_parse_datetime)]
 
 
+# ANSI CSI escape sequences (e.g. ``\x1b[J`` clear-screen, ``\x1b[H`` cursor-home).
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _strip_ansi(value: str | None) -> str | None:
+    """Remove ANSI CSI escape sequences from a string.
+
+    The Unraid GraphQL backend streams raw ``docker stats`` terminal output for
+    container statistics. The first row of every sample cycle carries
+    clear-screen/cursor-home escapes (``\\x1b[J\\x1b[H``) glued onto the field,
+    corrupting values such as the container ``id`` (see issue #71). Non-string
+    values pass through untouched.
+
+    Args:
+        value: A possibly escape-laden string, or None.
+
+    Returns:
+        The string with ANSI CSI sequences removed, or the value unchanged.
+
+    """
+    if isinstance(value, str):
+        return _ANSI_ESCAPE_RE.sub("", value)
+    return value
+
+
+# Reusable annotated type for string fields that may contain ANSI terminal
+# control sequences (see DockerContainerStats / issue #71).
+SanitizedStr = Annotated[str | None, BeforeValidator(_strip_ansi)]
+
+
 def format_bytes(bytes_value: int | None) -> str | None:
     """Convert bytes to human-readable string.
 
@@ -719,12 +749,12 @@ class DockerContainerStats(UnraidBaseModel):
 
     """
 
-    id: str | None = None
+    id: SanitizedStr = None
     cpuPercent: float | None = None
-    memUsage: str | None = None
+    memUsage: SanitizedStr = None
     memPercent: float | None = None
-    netIO: str | None = None
-    blockIO: str | None = None
+    netIO: SanitizedStr = None
+    blockIO: SanitizedStr = None
 
 
 class DockerContainer(UnraidBaseModel):
