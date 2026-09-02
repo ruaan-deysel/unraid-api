@@ -378,10 +378,10 @@ class InfoNetworkInterface(UnraidBaseModel):
     speed: int | None = None
     duplex: str | None = None
     mtu: int | None = None
-    internal: bool = False
-    virtual: bool = False
-    useDhcp: bool = False
-    useDhcp6: bool = False
+    internal: bool | None = None
+    virtual: bool | None = None
+    useDhcp: bool | None = None
+    useDhcp6: bool | None = None
     protocol: str | None = None
     operstate: str | None = None
     status: str | None = None
@@ -399,7 +399,7 @@ class InfoNetworkInterface(UnraidBaseModel):
         return self.macAddress
 
     @property
-    def dhcp(self) -> bool:
+    def dhcp(self) -> bool | None:
         """Compatibility property for DHCP enabled."""
         return self.useDhcp
 
@@ -1820,7 +1820,7 @@ class PluginInstallOperation(UnraidBaseModel):
     name: str | None = None
     url: str | None = None
     status: str | None = None
-    output: str | None = None
+    output: list[str] = []
     createdAt: str | None = None
     updatedAt: str | None = None
     finishedAt: str | None = None
@@ -1831,7 +1831,7 @@ class PluginInstallEvent(UnraidBaseModel):
 
     operationId: str
     status: str | None = None
-    output: str | None = None
+    output: list[str] = []
     timestamp: str | None = None
 
 

@@ -4039,7 +4039,7 @@ class TestPluginInstallModels:
             "name": "community.applications",
             "url": "https://example.com/plugin.plg",
             "status": "COMPLETED",
-            "output": "Plugin installed successfully",
+            "output": ["Downloading package...", "Plugin installed successfully"],
             "createdAt": "2026-09-02T00:00:00Z",
             "updatedAt": "2026-09-02T00:01:00Z",
             "finishedAt": "2026-09-02T00:01:05Z",
@@ -4047,6 +4047,8 @@ class TestPluginInstallModels:
         op = PluginInstallOperation(**data)
         assert op.id == "op:123"
         assert op.status == "COMPLETED"
+        assert len(op.output) == 2
+        assert op.output[1] == "Plugin installed successfully"
 
     def test_plugin_install_event(self) -> None:
         from unraid_api.models import PluginInstallEvent
@@ -4054,11 +4056,12 @@ class TestPluginInstallModels:
         event = PluginInstallEvent(
             operationId="op:123",
             status="RUNNING",
-            output="Downloading package...",
+            output=["Downloading package..."],
             timestamp="2026-09-02T00:00:30Z",
         )
         assert event.operationId == "op:123"
         assert event.status == "RUNNING"
+        assert event.output == ["Downloading package..."]
 
 
 class TestExtendedHardwareModels:

@@ -1072,21 +1072,21 @@ type ProfileModel {
 
 ```graphql
 type PluginInstallOperation {
-  id: PrefixedID!
-  name: String!
+  id: ID!
+  name: String
   url: String!
-  status: String!
-  output: String!
-  createdAt: String
-  updatedAt: String
-  finishedAt: String
+  status: PluginInstallStatus!
+  output: [String!]!
+  createdAt: DateTime!
+  updatedAt: DateTime
+  finishedAt: DateTime
 }
 
 type PluginInstallEvent {
-  operationId: String!
-  status: String!
-  output: String!
-  timestamp: String!
+  operationId: ID!
+  status: PluginInstallStatus!
+  output: [String!]!
+  timestamp: DateTime!
 }
 ```
 
@@ -1305,7 +1305,7 @@ query { services { name online version uptime { timestamp } } }
 
 # Plugins
 query { plugins { name version hasApiModule hasCliModule } }
-query { installedUnraidPlugins { name version icon author description } }
+query { installedUnraidPlugins }
 query {
   pluginInstallOperations {
     id name url status output createdAt updatedAt finishedAt
@@ -1496,15 +1496,6 @@ mutation {
     updateAutostartConfiguration(entries: [
       { id: "container:abc", autoStart: true, wait: 5 }
     ])
-  }
-}
-
-# Update individual container config / autostart
-mutation {
-  docker {
-    updateContainer(id: "container:abc123", input: { autoStart: true, autoStartWait: 10 }) {
-      id names state autoStart autoStartWait
-    }
   }
 }
 

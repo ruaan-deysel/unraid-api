@@ -5219,10 +5219,10 @@ class UnraidClient:
         entries: list[dict[str, Any]],
         persist_user_preferences: bool = True,
     ) -> bool:
-        """Update container autostart order and delay configuration.
+        """Update container autostart configuration.
 
         Args:
-            entries: List of autostart entry dicts with id, order, and wait.
+            entries: List of autostart entry dicts with id, autoStart, and wait.
             persist_user_preferences: Whether to persist user preferences.
 
         Returns:
@@ -5382,7 +5382,7 @@ class UnraidClient:
         from unraid_api.models import PluginInstallOperation
 
         query_str = """
-            query GetPluginInstallOp($operationId: String!) {
+            query GetPluginInstallOp($operationId: ID!) {
                 pluginInstallOperation(operationId: $operationId) {
                     id name url status output createdAt updatedAt finishedAt
                 }
@@ -5415,7 +5415,7 @@ class UnraidClient:
         return result.get("servers") or []
 
     async def typed_get_servers(self) -> list[Server]:
-        """Get all servers as typed Pydantic models.
+        """Get all servers in the network as typed Pydantic models.
 
         Returns:
             List of Server models.
@@ -5486,10 +5486,14 @@ class UnraidClient:
                 }
             }
         """
-        result = await self.mutate(
-            mutation,
-            {"name": name, "comment": comment, "sysModel": sys_model},
-        )
+        variables: dict[str, Any] = {}
+        if name is not None:
+            variables["name"] = name
+        if comment is not None:
+            variables["comment"] = comment
+        if sys_model is not None:
+            variables["sysModel"] = sys_model
+        result = await self.mutate(mutation, variables)
         return Server(**(result.get("updateServerIdentity") or {}))
 
     # =========================================================================

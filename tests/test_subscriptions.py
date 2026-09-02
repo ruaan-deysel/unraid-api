@@ -979,7 +979,7 @@ class TestTypedSubscriptions:
                         "pluginInstallUpdates": {
                             "operationId": "op:1",
                             "status": "RUNNING",
-                            "output": "Extracting files...",
+                            "output": ["Extracting files..."],
                             "timestamp": "2026-09-02T00:00:01Z",
                         }
                     }

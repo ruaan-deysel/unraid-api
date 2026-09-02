@@ -7361,7 +7361,7 @@ class TestNetworkInterfacesMethods:
                         "name": "eth0",
                         "description": "NIC 1",
                         "ipAddress": "192.168.1.50",
-                        "mac": "00:11:22:33:44:55",
+                        "macAddress": "00:11:22:33:44:55",
                         "speed": 1000,
                         "status": "UP",
                     }
@@ -7379,11 +7379,14 @@ class TestNetworkInterfacesMethods:
                 res = await client.get_network_interfaces()
                 assert len(res) == 1
                 assert res[0]["name"] == "eth0"
+                assert res[0]["macAddress"] == "00:11:22:33:44:55"
 
                 typed_res = await client.typed_get_network_interfaces()
                 assert len(typed_res) == 1
                 assert typed_res[0].name == "eth0"
                 assert typed_res[0].speed == 1000
+                assert typed_res[0].macAddress == "00:11:22:33:44:55"
+                assert typed_res[0].mac == "00:11:22:33:44:55"
 
 
 class TestDockerOrganizerMethods:
