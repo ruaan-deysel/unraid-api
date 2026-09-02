@@ -4905,10 +4905,10 @@ class UnraidClient:
     # =========================================================================
 
     async def get_network_interfaces(self) -> list[dict[str, Any]]:
-        """Get detailed network interfaces configuration and traffic metrics.
+        """Get detailed network interface configuration.
 
         Returns:
-            List of raw interface dicts.
+            List of raw interface dicts with address, DHCP, VLAN, and link state data.
 
         """
         query_str = """
@@ -5222,7 +5222,8 @@ class UnraidClient:
         """Update container autostart configuration.
 
         Args:
-            entries: List of autostart entry dicts with id, autoStart, and wait.
+            entries: List of autostart entry dicts with id, autoStart,
+                autoStartOrder, and autoStartWait.
             persist_user_preferences: Whether to persist user preferences.
 
         Returns:
