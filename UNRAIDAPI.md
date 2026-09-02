@@ -1,8 +1,8 @@
 # Unraid GraphQL API Reference
 
-> **API Version:** 4.29.2+
-> **Unraid Version:** 7.1.4+
-> **Last Updated:** January 2026
+> **API Version:** 4.37.x+
+> **Unraid Version:** 7.3.x+
+> **Last Updated:** September 2026
 
 This document provides a comprehensive reference for the Unraid GraphQL API, sourced from the official [unraid/api](https://github.com/unraid/api) repository.
 
@@ -975,6 +975,119 @@ type RemoteAccess {
   forwardType: WAN_FORWARD_TYPE
   port: Int
 }
+
+type InfoNetworkInterface {
+  id: PrefixedID!
+  name: String!
+  description: String
+  ipAddress: String
+  netmask: String
+  gateway: String
+  macAddress: String
+  speed: Int
+  duplex: String
+  mtu: Int
+  internal: Boolean
+  virtual: Boolean
+  useDhcp: Boolean
+  useDhcp6: Boolean
+  protocol: String
+  operstate: String
+  status: String
+  type: String
+  vlanId: Int
+  ipv4Addresses: [InfoNetworkIpv4Address!]!
+  ipv6Address: String
+  ipv6Gateway: String
+  ipv6Netmask: String
+  ipv6Addresses: [InfoNetworkIpv6Address!]!
+}
+
+type InfoNetworkIpv4Address {
+  address: String!
+  netmask: String!
+}
+
+type InfoNetworkIpv6Address {
+  address: String!
+  prefixLength: Int!
+}
+```
+
+### Docker Organizer
+
+```graphql
+type ResolvedOrganizerV1 {
+  version: Float!
+  views: [ResolvedOrganizerView!]!
+}
+
+type ResolvedOrganizerView {
+  id: String!
+  name: String!
+  rootId: String!
+  prefs: JSON
+  flatEntries: [FlatOrganizerEntry!]!
+}
+
+type FlatOrganizerEntry {
+  id: String!
+  name: String!
+  type: String!
+  parentId: String
+  childrenIds: [String!]!
+  depth: Float!
+  hasChildren: Boolean!
+  path: [String!]!
+  position: Float!
+}
+```
+
+### Server & Connect
+
+```graphql
+type Server {
+  id: PrefixedID!
+  name: String!
+  comment: String
+  guid: String
+  lanip: String
+  wanip: String
+  localurl: String
+  remoteurl: String
+  status: ServerStatus
+  apikey: String
+  owner: ProfileModel
+}
+
+type ProfileModel {
+  id: String
+  username: String!
+  avatar: String
+  url: String
+}
+```
+
+### Plugin Background Operations
+
+```graphql
+type PluginInstallOperation {
+  id: PrefixedID!
+  name: String!
+  url: String!
+  status: String!
+  output: String!
+  createdAt: String
+  updatedAt: String
+  finishedAt: String
+}
+
+type PluginInstallEvent {
+  operationId: String!
+  status: String!
+  output: String!
+  timestamp: String!
+}
 ```
 
 ---
@@ -1192,6 +1305,53 @@ query { services { name online version uptime { timestamp } } }
 
 # Plugins
 query { plugins { name version hasApiModule hasCliModule } }
+query { installedUnraidPlugins { name version icon author description } }
+query {
+  pluginInstallOperations {
+    id name url status output createdAt updatedAt finishedAt
+  }
+}
+
+# Network Interfaces
+query {
+  networkInterfaces {
+    id name description ipAddress netmask gateway macAddress
+    speed duplex mtu internal virtual useDhcp useDhcp6 protocol
+    operstate status type vlanId
+    ipv4Addresses { address netmask }
+    ipv6Address ipv6Gateway ipv6Netmask
+    ipv6Addresses { address prefixLength }
+  }
+}
+
+# Docker Organizer
+query {
+  docker {
+    organizer(skipCache: false) {
+      version
+      views {
+        id name rootId prefs
+        flatEntries {
+          id name type parentId childrenIds depth hasChildren path position
+        }
+      }
+    }
+  }
+}
+
+# Server & Connect Identity
+query {
+  servers {
+    id name guid lanip wanip localurl remoteurl status comment apikey
+    owner { id username avatar url }
+  }
+}
+query {
+  server {
+    id name guid lanip wanip localurl remoteurl status comment apikey
+    owner { id username avatar url }
+  }
+}
 
 # Log files
 query { logFiles { name path size modifiedAt } }
@@ -1336,6 +1496,64 @@ mutation {
     updateAutostartConfiguration(entries: [
       { id: "container:abc", autoStart: true, wait: 5 }
     ])
+  }
+}
+
+# Update individual container config / autostart
+mutation {
+  docker {
+    updateContainer(id: "container:abc123", input: { autoStart: true, autoStartWait: 10 }) {
+      id names state autoStart autoStartWait
+    }
+  }
+}
+
+# Docker Folder Management
+mutation {
+  createDockerFolder(name: "Media", childrenIds: ["container:1", "container:2"]) {
+    version
+    views { id name flatEntries { id name type } }
+  }
+}
+
+mutation {
+  renameDockerFolder(folderId: "folder:1", newName: "New Media") {
+    version
+    views { id name flatEntries { id name type } }
+  }
+}
+
+mutation {
+  deleteDockerEntries(entryIds: ["folder:1"]) {
+    version
+    views { id name flatEntries { id name type } }
+  }
+}
+
+mutation {
+  moveDockerEntriesToFolder(sourceEntryIds: ["container:1"], destinationFolderId: "folder:2") {
+    version
+    views { id name flatEntries { id name type } }
+  }
+}
+```
+
+### Server Identity Mutations
+
+```graphql
+# Update server identity
+mutation {
+  updateServerIdentity(name: "Tower", comment: "Main NAS", sysModel: "Custom Unraid") {
+    id
+    name
+    comment
+    guid
+    lanip
+    wanip
+    localurl
+    remoteurl
+    status
+    apikey
   }
 }
 ```

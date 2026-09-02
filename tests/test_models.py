@@ -3899,3 +3899,221 @@ class TestParityCheckSubscriptionFields:
         assert pc.duration == 3600
         assert pc.correcting is True
         assert pc.date == datetime(2026, 4, 11, 9, 0, 0, tzinfo=UTC)
+
+
+# =============================================================================
+# New Schema v4.37.x Models Tests
+# =============================================================================
+
+
+class TestInfoNetworkInterfaceModels:
+    """Tests for InfoNetworkInterface and IP address models."""
+
+    def test_network_interface_full_parse(self) -> None:
+        from unraid_api.models import InfoNetworkInterface
+
+        data = {
+            "id": "interface:eth0",
+            "name": "eth0",
+            "description": "Primary Ethernet",
+            "ipAddress": "192.168.1.100",
+            "netmask": "255.255.255.0",
+            "gateway": "192.168.1.1",
+            "macAddress": "00:11:22:33:44:55",
+            "speed": 1000,
+            "duplex": "full",
+            "mtu": 1500,
+            "internal": False,
+            "virtual": False,
+            "useDhcp": True,
+            "useDhcp6": False,
+            "protocol": "ipv4",
+            "operstate": "up",
+            "status": "UP",
+            "type": "ethernet",
+            "vlanId": 10,
+            "ipv4Addresses": [{"address": "192.168.1.100", "netmask": "255.255.255.0"}],
+            "ipv6Address": "fe80::1",
+            "ipv6Addresses": [{"address": "fe80::1", "prefixLength": 64}],
+            "ipv6Gateway": "fe80::gateway",
+            "ipv6Netmask": "/64",
+        }
+        iface = InfoNetworkInterface(**data)
+        assert iface.id == "interface:eth0"
+        assert iface.name == "eth0"
+        assert iface.speed == 1000
+        assert iface.macAddress == "00:11:22:33:44:55"
+        assert iface.mac == "00:11:22:33:44:55"
+        assert iface.useDhcp is True
+        assert iface.dhcp is True
+        assert len(iface.ipv4Addresses) == 1
+        assert iface.ipv4Addresses[0].address == "192.168.1.100"
+        assert iface.ipv4Addresses[0].netmask == "255.255.255.0"
+        assert len(iface.ipv6Addresses) == 1
+        assert iface.ipv6Addresses[0].prefixLength == 64
+
+
+class TestDockerOrganizerModels:
+    """Tests for ResolvedOrganizerV1, ResolvedOrganizerView, FlatOrganizerEntry."""
+
+    def test_organizer_model(self) -> None:
+        from unraid_api.models import FlatOrganizerEntry, ResolvedOrganizerV1
+
+        data = {
+            "version": 1.0,
+            "views": [
+                {
+                    "id": "view:docker",
+                    "name": "Docker",
+                    "rootId": "root:1",
+                    "prefs": {"showHidden": True},
+                    "flatEntries": [
+                        {
+                            "id": "entry:1",
+                            "name": "Media",
+                            "type": "folder",
+                            "depth": 0.0,
+                            "hasChildren": True,
+                            "childrenIds": ["c1", "c2"],
+                            "path": ["Media"],
+                            "position": 1.0,
+                        }
+                    ],
+                }
+            ],
+        }
+        org = ResolvedOrganizerV1(**data)
+        assert org.version == 1.0
+        assert len(org.views) == 1
+        assert org.views[0].name == "Docker"
+        assert org.views[0].prefs == {"showHidden": True}
+        assert len(org.views[0].flatEntries) == 1
+        entry = org.views[0].flatEntries[0]
+        assert isinstance(entry, FlatOrganizerEntry)
+        assert entry.name == "Media"
+        assert entry.type == "folder"
+        assert entry.hasChildren is True
+        assert entry.childrenIds == ["c1", "c2"]
+
+
+class TestServerAndProfileModels:
+    """Tests for Server and ProfileModel."""
+
+    def test_server_model(self) -> None:
+        from unraid_api.models import Server
+
+        data = {
+            "id": "server:tower",
+            "name": "Tower",
+            "guid": "guid-12345",
+            "lanip": "192.168.1.10",
+            "wanip": "203.0.113.1",
+            "localurl": "http://tower.local",
+            "remoteurl": "https://remote.myunraid.net",
+            "status": "ONLINE",
+            "comment": "Main NAS",
+            "apikey": "key-xyz",
+            "owner": {
+                "id": "owner:1",
+                "username": "admin",
+                "avatar": "https://avatar.url",
+                "url": "https://profile.url",
+            },
+        }
+        server = Server(**data)
+        assert server.id == "server:tower"
+        assert server.name == "Tower"
+        assert server.status == "ONLINE"
+        assert server.owner is not None
+        assert server.owner.username == "admin"
+
+
+class TestPluginInstallModels:
+    """Tests for PluginInstallOperation and PluginInstallEvent."""
+
+    def test_plugin_install_operation(self) -> None:
+        from unraid_api.models import PluginInstallOperation
+
+        data = {
+            "id": "op:123",
+            "name": "community.applications",
+            "url": "https://example.com/plugin.plg",
+            "status": "COMPLETED",
+            "output": "Plugin installed successfully",
+            "createdAt": "2026-09-02T00:00:00Z",
+            "updatedAt": "2026-09-02T00:01:00Z",
+            "finishedAt": "2026-09-02T00:01:05Z",
+        }
+        op = PluginInstallOperation(**data)
+        assert op.id == "op:123"
+        assert op.status == "COMPLETED"
+
+    def test_plugin_install_event(self) -> None:
+        from unraid_api.models import PluginInstallEvent
+
+        event = PluginInstallEvent(
+            operationId="op:123",
+            status="RUNNING",
+            output="Downloading package...",
+            timestamp="2026-09-02T00:00:30Z",
+        )
+        assert event.operationId == "op:123"
+        assert event.status == "RUNNING"
+
+
+class TestExtendedHardwareModels:
+    """Tests for MemoryLayout, InfoDisplay, InfoDevices, InfoBaseboard."""
+
+    def test_hardware_models(self) -> None:
+        from unraid_api.models import (
+            InfoBaseboard,
+            InfoDevices,
+            InfoDisplay,
+            InfoGpu,
+            InfoMemory,
+            MemoryLayout,
+            PackageVersions,
+        )
+
+        mem = InfoMemory(
+            layout=[
+                MemoryLayout(
+                    id="dimm:1",
+                    size=17179869184,
+                    bank="BANK 0",
+                    type="DDR4",
+                    clockSpeed=3200,
+                    manufacturer="Corsair",
+                    partNum="CMK32GX4M2B3200C16",
+                    serialNum="12345678",
+                )
+            ]
+        )
+        assert len(mem.layout) == 1
+        assert mem.layout[0].clockSpeed == 3200
+
+        disp = InfoDisplay(
+            theme="azure",
+            unit="CELSIUS",
+            warning=45,
+            critical=55,
+        )
+        assert disp.theme == "azure"
+        assert disp.warning == 45
+
+        dev = InfoDevices(
+            gpu=[
+                InfoGpu(
+                    class_="VGA compatible controller", vendorname="NVIDIA Corporation"
+                )
+            ]
+        )
+        assert len(dev.gpu) == 1
+        assert dev.gpu[0].class_ == "VGA compatible controller"
+
+        base = InfoBaseboard(manufacturer="ASUS", model="ROG STRIX", memSlots=4)
+        assert base.manufacturer == "ASUS"
+        assert base.memSlots == 4
+
+        pkg = PackageVersions(docker="27.0.3", nginx="1.26.1", node="20.15.0")
+        assert pkg.docker == "27.0.3"

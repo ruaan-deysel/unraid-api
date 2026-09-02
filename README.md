@@ -28,6 +28,7 @@ pip install unraid-api
 import asyncio
 from unraid_api import UnraidClient
 
+
 async def main():
     async with UnraidClient("192.168.1.100", "your-api-key") as client:
         # Test connection
@@ -37,6 +38,7 @@ async def main():
             # Get version info
             version = await client.get_version()
             print(f"Unraid {version['unraid']}, API {version['api']}")
+
 
 asyncio.run(main())
 ```
@@ -106,6 +108,7 @@ async with UnraidClient(host, api_key) as client:
 ```python
 import aiohttp
 from unraid_api import UnraidClient
+
 
 async def setup_client(session: aiohttp.ClientSession):
     """Use shared session from Home Assistant."""

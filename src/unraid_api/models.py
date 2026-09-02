@@ -132,35 +132,81 @@ class UnraidBaseModel(BaseModel):
 class InfoSystem(UnraidBaseModel):
     """System information (manufacturer, model, version, serial, UUID)."""
 
+    id: str | None = None
     uuid: str | None = None
     manufacturer: str | None = None
     model: str | None = None
     version: str | None = None
     serial: str | None = None
+    sku: str | None = None
+    virtual: bool | None = None
 
 
 class CpuPackages(UnraidBaseModel):
     """CPU package information (temperature, power consumption)."""
 
+    id: str | None = None
     temp: list[float] = []
+    power: list[float] = []
     totalPower: float | None = None
 
 
 class InfoCpu(UnraidBaseModel):
-    """CPU information (brand, threads, cores, temperature, power)."""
+    """CPU information (brand, threads, cores, temperature, power, specs)."""
 
+    id: str | None = None
     brand: str | None = None
+    manufacturer: str | None = None
+    vendor: str | None = None
+    family: str | None = None
+    model: str | None = None
+    stepping: int | None = None
+    revision: str | None = None
+    voltage: str | None = None
+    speed: float | None = None
+    speedmin: float | None = None
+    speedmax: float | None = None
     threads: int | None = None
     cores: int | None = None
+    processors: int | None = None
+    socket: str | None = None
+    cache: dict[str, Any] | None = None
+    flags: list[str] = []
+    topology: list[Any] = []
     packages: CpuPackages = CpuPackages()
 
 
 class InfoOs(UnraidBaseModel):
-    """Operating system information (hostname, uptime, kernel)."""
+    """Operating system information (hostname, uptime, kernel, platform)."""
 
+    id: str | None = None
     hostname: str | None = None
-    uptime: ParsedDatetime = None
+    platform: str | None = None
+    distro: str | None = None
+    release: str | None = None
+    codename: str | None = None
     kernel: str | None = None
+    arch: str | None = None
+    fqdn: str | None = None
+    build: str | None = None
+    servicepack: str | None = None
+    uptime: ParsedDatetime = None
+    logofile: str | None = None
+    serial: str | None = None
+    uefi: bool | None = None
+
+
+class PackageVersions(UnraidBaseModel):
+    """Installed package versions."""
+
+    docker: str | None = None
+    git: str | None = None
+    nginx: str | None = None
+    node: str | None = None
+    npm: str | None = None
+    openssl: str | None = None
+    php: str | None = None
+    pm2: str | None = None
 
 
 class CoreVersions(UnraidBaseModel):
@@ -174,17 +220,205 @@ class CoreVersions(UnraidBaseModel):
 class InfoVersions(UnraidBaseModel):
     """Version information container."""
 
+    id: str | None = None
     core: CoreVersions = CoreVersions()
+    packages: PackageVersions | None = None
+
+
+class MemoryLayout(UnraidBaseModel):
+    """Individual memory module (DIMM) details."""
+
+    id: str | None = None
+    size: int | None = None
+    bank: str | None = None
+    type: str | None = None
+    clockSpeed: int | None = None
+    partNum: str | None = None
+    serialNum: str | None = None
+    manufacturer: str | None = None
+    formFactor: str | None = None
+    voltageConfigured: int | None = None
+    voltageMin: int | None = None
+    voltageMax: int | None = None
+
+
+class InfoMemory(UnraidBaseModel):
+    """System memory layout information."""
+
+    id: str | None = None
+    layout: list[MemoryLayout] = []
+
+
+class InfoDisplayCase(UnraidBaseModel):
+    """Display case icon information."""
+
+    id: str | None = None
+    base64: str | None = None
+    error: str | None = None
+    icon: str | None = None
+    url: str | None = None
+
+
+class InfoDisplay(UnraidBaseModel):
+    """System display and UI preferences."""
+
+    id: str | None = None
+    case: InfoDisplayCase | None = None
+    theme: str | None = None
+    unit: str | None = None
+    scale: bool | None = None
+    tabs: bool | None = None
+    resize: bool | None = None
+    wwn: bool | None = None
+    total: bool | None = None
+    usage: bool | None = None
+    text: bool | None = None
+    warning: int | None = None
+    critical: int | None = None
+    hot: int | None = None
+    max: int | None = None
+    locale: str | None = None
+
+
+class InfoGpu(UnraidBaseModel):
+    """GPU device details."""
+
+    id: str | None = None
+    class_: str | None = Field(default=None, alias="class")
+    productid: str | None = None
+    type: str | None = None
+    typeid: str | None = None
+    vendorname: str | None = None
+    blacklisted: bool | None = None
+
+
+class InfoNetwork(UnraidBaseModel):
+    """Network adapter hardware information."""
+
+    id: str | None = None
+    dhcp: bool | None = None
+    iface: str | None = None
+    mac: str | None = None
+    model: str | None = None
+    speed: int | None = None
+    vendor: str | None = None
+    virtual: bool | None = None
+
+
+class InfoPci(UnraidBaseModel):
+    """PCI device details."""
+
+    id: str | None = None
+    class_: str | None = Field(default=None, alias="class")
+    productid: str | None = None
+    productname: str | None = None
+    type: str | None = None
+    typeid: str | None = None
+    vendorid: str | None = None
+    vendorname: str | None = None
+    blacklisted: bool | None = None
+
+
+class InfoUsb(UnraidBaseModel):
+    """USB device details."""
+
+    id: str | None = None
+    bus: str | None = None
+    device: str | None = None
+    name: str | None = None
+
+
+class InfoDevices(UnraidBaseModel):
+    """System hardware devices."""
+
+    id: str | None = None
+    gpu: list[InfoGpu] = []
+    network: list[InfoNetwork] = []
+    pci: list[InfoPci] = []
+    usb: list[InfoUsb] = []
+
+
+class InfoBaseboard(UnraidBaseModel):
+    """Baseboard/motherboard hardware information."""
+
+    id: str | None = None
+    manufacturer: str | None = None
+    model: str | None = None
+    version: str | None = None
+    serial: str | None = None
+    assetTag: str | None = None
+    memMax: float | None = None
+    memSlots: float | None = None
+
+
+class InfoNetworkIpv4Address(UnraidBaseModel):
+    """IPv4 address and netmask for a network interface."""
+
+    address: str
+    netmask: str | None = None
+
+
+class InfoNetworkIpv6Address(UnraidBaseModel):
+    """IPv6 address and prefix length for a network interface."""
+
+    address: str
+    prefixLength: int | None = None
+
+
+class InfoNetworkInterface(UnraidBaseModel):
+    """Network interface hardware and IP configuration."""
+
+    id: str
+    name: str
+    description: str | None = None
+    ipAddress: str | None = None
+    netmask: str | None = None
+    gateway: str | None = None
+    macAddress: str | None = None
+    speed: int | None = None
+    duplex: str | None = None
+    mtu: int | None = None
+    internal: bool = False
+    virtual: bool = False
+    useDhcp: bool = False
+    useDhcp6: bool = False
+    protocol: str | None = None
+    operstate: str | None = None
+    status: str | None = None
+    type: str | None = None
+    vlanId: int | None = None
+    ipv4Addresses: list[InfoNetworkIpv4Address] = []
+    ipv6Address: str | None = None
+    ipv6Addresses: list[InfoNetworkIpv6Address] = []
+    ipv6Gateway: str | None = None
+    ipv6Netmask: str | None = None
+
+    @property
+    def mac(self) -> str | None:
+        """Compatibility property for MAC address."""
+        return self.macAddress
+
+    @property
+    def dhcp(self) -> bool:
+        """Compatibility property for DHCP enabled."""
+        return self.useDhcp
 
 
 class SystemInfo(UnraidBaseModel):
     """Complete system information."""
 
+    id: str | None = None
     time: ParsedDatetime = None
     system: InfoSystem = InfoSystem()
     cpu: InfoCpu = InfoCpu()
     os: InfoOs = InfoOs()
     versions: InfoVersions = InfoVersions()
+    memory: InfoMemory = InfoMemory()
+    display: InfoDisplay = InfoDisplay()
+    devices: InfoDevices = InfoDevices()
+    baseboard: InfoBaseboard = InfoBaseboard()
+    networkInterfaces: list[InfoNetworkInterface] = []
+    primaryNetwork: InfoNetworkInterface | None = None
 
 
 # =============================================================================
@@ -633,6 +867,7 @@ class ArrayDisk(UnraidBaseModel):
 class UnraidArray(UnraidBaseModel):
     """Complete array information."""
 
+    id: str | None = None
     state: str | None = None
     capacity: ArrayCapacity = ArrayCapacity()
     parityCheckStatus: ParityCheck = ParityCheck()
@@ -881,6 +1116,37 @@ class DockerNetwork(UnraidBaseModel):
     attachable: bool | None = None
     ingress: bool | None = None
     configOnly: bool | None = None
+
+
+class FlatOrganizerEntry(UnraidBaseModel):
+    """An entry (folder or container) in the Docker organizer tree."""
+
+    id: str
+    name: str
+    type: str
+    parentId: str | None = None
+    childrenIds: list[str] = []
+    depth: float = 0.0
+    hasChildren: bool = False
+    path: list[str] = []
+    position: float = 0.0
+
+
+class ResolvedOrganizerView(UnraidBaseModel):
+    """View configuration within the Docker organizer."""
+
+    id: str
+    name: str
+    rootId: str | None = None
+    prefs: dict[str, Any] | None = None
+    flatEntries: list[FlatOrganizerEntry] = []
+
+
+class ResolvedOrganizerV1(UnraidBaseModel):
+    """Docker organizer hierarchy and folder views."""
+
+    version: float = 1.0
+    views: list[ResolvedOrganizerView] = []
 
 
 # =============================================================================
@@ -1432,6 +1698,21 @@ class Vars(UnraidBaseModel):
     share_nfs_count: int | None = Field(default=None, alias="shareNfsCount")
     share_afp_count: int | None = Field(default=None, alias="shareAfpCount")
     share_mover_active: bool | None = Field(default=None, alias="shareMoverActive")
+    share_mover_logging: bool | None = Field(default=None, alias="shareMoverLogging")
+    share_mover_schedule: str | None = Field(default=None, alias="shareMoverSchedule")
+
+    # Boot & system setup (Unraid 7.2+)
+    boot_eligible: bool | None = Field(default=None, alias="bootEligible")
+    booted_from_flash_with_internal_boot_setup: bool | None = Field(
+        default=None, alias="bootedFromFlashWithInternalBootSetup"
+    )
+    tpm_guid: str | None = Field(default=None, alias="tpmGuid")
+    sb_synced: int | None = Field(default=None, alias="sbSynced")
+    sb_sync_errs: int | None = Field(default=None, alias="sbSyncErrs")
+    sb_sync_exit: str | None = Field(default=None, alias="sbSyncExit")
+    fs_unmountable_mask: str | None = Field(default=None, alias="fsUnmountableMask")
+    default_fs_type: str | None = Field(default=None, alias="defaultFsType")
+    default_format: str | None = Field(default=None, alias="defaultFormat")
 
     # Security
     csrf_token: str | None = Field(default=None, alias="csrfToken")
@@ -1467,13 +1748,23 @@ class Flash(UnraidBaseModel):
     """Flash drive information."""
 
     id: str
+    guid: str | None = None
     product: str | None = None
     vendor: str | None = None
 
 
 # =============================================================================
-# Owner Models
+# Owner & Server Models
 # =============================================================================
+
+
+class ProfileModel(UnraidBaseModel):
+    """Server owner profile information."""
+
+    id: str | None = None
+    username: str | None = None
+    avatar: str | None = None
+    url: str | None = None
 
 
 class Owner(UnraidBaseModel):
@@ -1482,6 +1773,22 @@ class Owner(UnraidBaseModel):
     username: str
     avatar: str | None = None
     url: str | None = None
+
+
+class Server(UnraidBaseModel):
+    """Unraid server identity and connectivity information."""
+
+    id: str = ""
+    name: str | None = None
+    guid: str | None = None
+    lanip: str | None = None
+    wanip: str | None = None
+    localurl: str | None = None
+    remoteurl: str | None = None
+    status: str | None = None
+    comment: str | None = None
+    apikey: str | None = None
+    owner: ProfileModel | None = None
 
 
 # =============================================================================
@@ -1504,6 +1811,28 @@ class Plugin(UnraidBaseModel):
     version: str
     hasApiModule: bool | None = None
     hasCliModule: bool | None = None
+
+
+class PluginInstallOperation(UnraidBaseModel):
+    """Background plugin installation operation."""
+
+    id: str
+    name: str | None = None
+    url: str | None = None
+    status: str | None = None
+    output: str | None = None
+    createdAt: str | None = None
+    updatedAt: str | None = None
+    finishedAt: str | None = None
+
+
+class PluginInstallEvent(UnraidBaseModel):
+    """Real-time plugin install update event from subscription."""
+
+    operationId: str
+    status: str | None = None
+    output: str | None = None
+    timestamp: str | None = None
 
 
 # =============================================================================
@@ -2082,6 +2411,9 @@ class NetworkMetrics(UnraidBaseModel):
         rxSec: Receive rate in bytes per second.
         txSec: Transmit rate in bytes per second.
         operstate: Interface operational state (e.g., "up", "down", "unknown").
+        speed: Interface link speed in Mbps.
+        utilizationPercent: Interface bandwidth utilization percentage.
+        lastUpdated: ISO timestamp of last metric update.
         bytesReceived: Total bytes received since boot.
         bytesSent: Total bytes sent since boot.
         packetsReceived: Total packets received since boot.
@@ -2098,6 +2430,9 @@ class NetworkMetrics(UnraidBaseModel):
     rxSec: float | None = None
     txSec: float | None = None
     operstate: str | None = None
+    speed: int | None = None
+    utilizationPercent: float | None = None
+    lastUpdated: str | None = None
     bytesReceived: int | None = None
     bytesSent: int | None = None
     packetsReceived: int | None = None
