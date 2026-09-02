@@ -999,3 +999,8 @@ class TestTypedSubscriptions:
         assert isinstance(results[0], PluginInstallEvent)
         assert results[0].operationId == "op:1"
         assert results[0].status == "RUNNING"
+
+        # Assert variable was forwarded in subscribe payload
+        subscribe_frame = json.loads(ws._send_history[1])
+        assert subscribe_frame["type"] == "subscribe"
+        assert subscribe_frame["payload"]["variables"] == {"operationId": "op:1"}
