@@ -7748,9 +7748,11 @@ class TestContainerAutostartMutation:
     """Tests for update_container_autostart."""
 
     async def test_update_container_autostart(self) -> None:
+        """Verify update_container_autostart uses DockerAutostartEntryInput."""
         captured_requests: list[str] = []
 
         async def capture(url, **kwargs):  # type: ignore[no-untyped-def]
+            """Capture outgoing GraphQL query for assertion."""
             body = kwargs.get("json") or {}
             captured_requests.append(body.get("query", ""))
             return CallbackResult(
