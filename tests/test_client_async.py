@@ -7748,12 +7748,21 @@ class TestContainerAutostartMutation:
     """Tests for update_container_autostart."""
 
     async def test_update_container_autostart(self) -> None:
-        async with aiointercept(mock_external_urls=True) as m:
-            m.get("http://unraid.test/graphql", status=400)
-            m.post(
-                "http://unraid.test/graphql",
+        """Verify update_container_autostart uses DockerAutostartEntryInput."""
+        captured_requests: list[str] = []
+
+        async def capture(url, **kwargs):  # type: ignore[no-untyped-def]
+            """Capture outgoing GraphQL query for assertion."""
+            body = kwargs.get("json") or {}
+            captured_requests.append(body.get("query", ""))
+            return CallbackResult(
+                status=200,
                 payload={"data": {"docker": {"updateAutostartConfiguration": True}}},
             )
+
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
+            m.post("http://unraid.test/graphql", callback=capture)
 
             async with UnraidClient(
                 "unraid.test", "test-key", verify_ssl=False
@@ -7769,3 +7778,7 @@ class TestContainerAutostartMutation:
                     ]
                 )
                 assert res is True
+
+        assert captured_requests, "no GraphQL request was captured"
+        assert "$entries: [DockerAutostartEntryInput!]!" in captured_requests[0]
+        assert "AutostartConfigurationEntryInput" not in captured_requests[0]

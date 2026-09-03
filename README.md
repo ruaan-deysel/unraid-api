@@ -268,6 +268,7 @@ async with UnraidClient(host, api_key) as client:
 | `update_container(id)` | Update container to latest image |
 | `update_containers(ids)` | Update selected containers (API 4.35.0+) |
 | `update_all_containers()` | Update every container with a pending update (API 4.35.0+) |
+| `update_container_autostart(entries)` | Update container autostart configuration (API 4.37.0+) |
 | `refresh_docker_digests()` | Re-check remote image digests ("check for updates", API 4.35.0+) |
 
 #### Subscription Methods (WebSocket)

@@ -5232,7 +5232,7 @@ class UnraidClient:
         """
         mutation = """
             mutation UpdateAutostartConfig(
-                $entries: [AutostartConfigurationEntryInput!]!,
+                $entries: [DockerAutostartEntryInput!]!,
                 $persist: Boolean
             ) {
                 docker {
