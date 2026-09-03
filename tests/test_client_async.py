@@ -7640,6 +7640,19 @@ class TestServerMethods:
                 },
             )
 
+            m.post(
+                "http://unraid.test/graphql",
+                payload={
+                    "data": {
+                        "updateServerIdentity": {
+                            "id": "server:1",
+                            "name": "Tower",
+                            "status": "ONLINE",
+                        }
+                    }
+                },
+            )
+
             async with UnraidClient(
                 "unraid.test", "test-key", verify_ssl=False
             ) as client:
@@ -7655,8 +7668,15 @@ class TestServerMethods:
                 assert server is not None
                 assert server.id == "server:1"
 
-                updated = await client.update_server_identity(name="Tower-Updated")
+                updated = await client.update_server_identity(
+                    name="Tower-Updated",
+                    comment="Primary NAS",
+                    sys_model="Custom Build",
+                )
                 assert updated.name == "Tower-Updated"
+
+                updated_empty = await client.update_server_identity()
+                assert updated_empty.name == "Tower"
 
 
 class TestNotificationBatchMutations:

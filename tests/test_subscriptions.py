@@ -917,9 +917,10 @@ class TestTypedSubscriptions:
                 },
             }
         )
+        empty_msg = _ws_text_msg({"id": "test", "type": "next", "payload": {}})
         complete = _ws_text_msg({"id": "test", "type": "complete"})
 
-        ws = MockWebSocket([ack, next_msg, complete])
+        ws = MockWebSocket([ack, empty_msg, next_msg, complete])
         ws_client._session.ws_connect = AsyncMock(return_value=ws)  # type: ignore[union-attr]
 
         results: list[Owner] = []
@@ -950,9 +951,10 @@ class TestTypedSubscriptions:
                 },
             }
         )
+        empty_msg = _ws_text_msg({"id": "test", "type": "next", "payload": {}})
         complete = _ws_text_msg({"id": "test", "type": "complete"})
 
-        ws = MockWebSocket([ack, next_msg, complete])
+        ws = MockWebSocket([ack, empty_msg, next_msg, complete])
         ws_client._session.ws_connect = AsyncMock(return_value=ws)  # type: ignore[union-attr]
 
         results: list[Server] = []
@@ -986,9 +988,10 @@ class TestTypedSubscriptions:
                 },
             }
         )
+        empty_msg = _ws_text_msg({"id": "test", "type": "next", "payload": {}})
         complete = _ws_text_msg({"id": "test", "type": "complete"})
 
-        ws = MockWebSocket([ack, next_msg, complete])
+        ws = MockWebSocket([ack, empty_msg, next_msg, complete])
         ws_client._session.ws_connect = AsyncMock(return_value=ws)  # type: ignore[union-attr]
 
         results: list[PluginInstallEvent] = []
