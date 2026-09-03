@@ -20,8 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Unraid Plugin Background Operations** — Added `get_installed_unraid_plugins()`, `get_plugin_install_operations()`, and `get_plugin_install_operation()` with `PluginInstallOperation` and `PluginInstallEvent` models.
 - **Batch Notification Mutations** — Added `archive_notifications()`, `unarchive_notifications()`, `unarchive_all_notifications()`, and `recalculate_notification_overview()`.
 - **Real-Time Subscriptions** — Added WebSocket subscription helpers `subscribe_owner()`, `subscribe_servers()`, and `subscribe_plugin_install_updates()`.
-- **Expanded Capabilities & Schema Validator** — Registered new capability checks (`InfoNetworkInterface`, `ResolvedOrganizerV1`, `Server`, `PluginInstallOperation`, `ArrayMutations`) in `CAPABILITY_TYPES` and updated `scripts/validate-schema.py` to validate all 56 client methods against live Unraid servers.
 - **Codecov Coverage Reporting & PR Status Checks** — Integrated Codecov into GitHub Actions CI workflows with XML/branch coverage reporting, a `codecov.yml` configuration enforcing 95% project and patch coverage thresholds, and repository README coverage badge.
+- **Python 3.14 CI Matrix & Workflow Streamlining** — Added Python 3.14 to the GitHub Actions test matrix across all supported Python versions (`3.11`, `3.12`, `3.13`, `3.14`). Removed standalone Bandit SAST and OSV Scanner workflows in favor of consolidated Ruff security linting (`flake8-bandit`).
 
 ## [1.12.1] - 2026-06-26
 
