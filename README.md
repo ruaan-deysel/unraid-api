@@ -3,6 +3,7 @@
 [![PyPI version](https://badge.fury.io/py/unraid-api.svg)](https://badge.fury.io/py/unraid-api)
 [![Python versions](https://img.shields.io/pypi/pyversions/unraid-api.svg)](https://pypi.org/project/unraid-api/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![codecov](https://codecov.io/gh/ruaan-deysel/unraid-api/graph/badge.svg?token=QY61Z24GNZ)](https://codecov.io/gh/ruaan-deysel/unraid-api)
 
 An async Python client library for the Unraid GraphQL API.
 

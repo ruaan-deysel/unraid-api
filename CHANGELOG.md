@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Batch Notification Mutations** — Added `archive_notifications()`, `unarchive_notifications()`, `unarchive_all_notifications()`, and `recalculate_notification_overview()`.
 - **Real-Time Subscriptions** — Added WebSocket subscription helpers `subscribe_owner()`, `subscribe_servers()`, and `subscribe_plugin_install_updates()`.
 - **Expanded Capabilities & Schema Validator** — Registered new capability checks (`InfoNetworkInterface`, `ResolvedOrganizerV1`, `Server`, `PluginInstallOperation`, `ArrayMutations`) in `CAPABILITY_TYPES` and updated `scripts/validate-schema.py` to validate all 56 client methods against live Unraid servers.
+- **Codecov Coverage Reporting & PR Status Checks** — Integrated Codecov into GitHub Actions CI workflows with XML/branch coverage reporting, a `codecov.yml` configuration enforcing 95% project and patch coverage thresholds, and repository README coverage badge.
 
 ## [1.12.1] - 2026-06-26
 
