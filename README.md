@@ -3,6 +3,7 @@
 [![PyPI version](https://badge.fury.io/py/unraid-api.svg)](https://badge.fury.io/py/unraid-api)
 [![Python versions](https://img.shields.io/pypi/pyversions/unraid-api.svg)](https://pypi.org/project/unraid-api/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![codecov](https://codecov.io/gh/ruaan-deysel/unraid-api/graph/badge.svg?token=QY61Z24GNZ)](https://codecov.io/gh/ruaan-deysel/unraid-api)
 
 An async Python client library for the Unraid GraphQL API.
 
@@ -28,6 +29,7 @@ pip install unraid-api
 import asyncio
 from unraid_api import UnraidClient
 
+
 async def main():
     async with UnraidClient("192.168.1.100", "your-api-key") as client:
         # Test connection
@@ -37,6 +39,7 @@ async def main():
             # Get version info
             version = await client.get_version()
             print(f"Unraid {version['unraid']}, API {version['api']}")
+
 
 asyncio.run(main())
 ```
@@ -106,6 +109,7 @@ async with UnraidClient(host, api_key) as client:
 ```python
 import aiohttp
 from unraid_api import UnraidClient
+
 
 async def setup_client(session: aiohttp.ClientSession):
     """Use shared session from Home Assistant."""

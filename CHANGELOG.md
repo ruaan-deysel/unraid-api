@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-09-02
+
+### Added
+
+- **Unraid OS 7.3.x & GraphQL API 4.37.x Schema Compatibility** — Full model alignment, query updates, and live server verification against Unraid 7.3.2 and GraphQL API 4.37.3+d5058009.
+- **Network Interface Queries & Models** — Added `get_network_interfaces()` and `typed_get_network_interfaces()` returning `InfoNetworkInterface` models with IPv4/IPv6 addresses, MAC address, MTU, duplex, DHCP configuration, VLAN ID, and operational state.
+- **Docker Organizer & Folder Management** — Added `get_docker_organizer()` and `typed_get_docker_organizer()` returning `ResolvedOrganizerV1`, `ResolvedOrganizerView`, and `FlatOrganizerEntry` hierarchies. Added folder management mutations: `create_docker_folder()`, `rename_docker_folder()`, `delete_docker_entries()`, and `move_docker_entries_to_folder()`.
+- **Docker Container Autostart Configuration** — Added `update_container_autostart()` mutation for updating a batch of container `autoStart`, `autoStartOrder`, and `autoStartWait` entries via `docker.updateAutostartConfiguration`.
+- **Array Disk Control Mutations** — Added `mount_array_disk()`, `unmount_array_disk()`, and `clear_array_disk_statistics()` for individual disk operations.
+- **Server Identity & Connect Queries** — Added `get_servers()`, `typed_get_servers()`, `get_server()`, `typed_get_server()`, and `update_server_identity()` along with `Server` and `ProfileModel` types.
+- **Unraid Plugin Background Operations** — Added `get_installed_unraid_plugins()`, `get_plugin_install_operations()`, and `get_plugin_install_operation()` with `PluginInstallOperation` and `PluginInstallEvent` models.
+- **Batch Notification Mutations** — Added `archive_notifications()`, `unarchive_notifications()`, `unarchive_all_notifications()`, and `recalculate_notification_overview()`.
+- **Real-Time Subscriptions** — Added WebSocket subscription helpers `subscribe_owner()`, `subscribe_servers()`, and `subscribe_plugin_install_updates()` (with `operationId: ID!`).
+- **Codecov Coverage Reporting & PR Status Checks** — Integrated Codecov into GitHub Actions CI workflows with XML/branch coverage reporting, a `codecov.yml` configuration enforcing 95% project and patch coverage thresholds, and repository README coverage badge.
+- **Python 3.14 CI Matrix & Workflow Streamlining** — Added Python 3.14 to the GitHub Actions test matrix across all supported Python versions (`3.11`, `3.12`, `3.13`, `3.14`). Removed standalone Bandit SAST and OSV Scanner workflows in favor of consolidated Ruff security linting (`flake8-bandit`).
+
 ## [1.12.1] - 2026-06-26
 
 ### Fixed

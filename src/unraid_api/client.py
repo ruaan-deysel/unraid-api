@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
     from unraid_api.models import (
         ApiKey,
+        ArrayDisk,
         ArraySubscriptionUpdate,
         Cloud,
         Connect,
@@ -42,6 +43,7 @@ if TYPE_CHECKING:
         DockerNetwork,
         DockerPortConflicts,
         Flash,
+        InfoNetworkInterface,
         LogFile,
         MemoryMetrics,
         Network,
@@ -53,8 +55,12 @@ if TYPE_CHECKING:
         ParityHistoryEntry,
         PhysicalDisk,
         Plugin,
+        PluginInstallEvent,
+        PluginInstallOperation,
         Registration,
         RemoteAccess,
+        ResolvedOrganizerV1,
+        Server,
         ServerInfo,
         Service,
         Settings,
@@ -4893,3 +4899,785 @@ class UnraidClient:
             config["killUps"] = kill_ups
         result = await self.mutate(mutation, {"config": config})
         return bool(result.get("configureUps", False))
+
+    # =========================================================================
+    # Network Interfaces (API 4.35.0+)
+    # =========================================================================
+
+    async def get_network_interfaces(self) -> list[dict[str, Any]]:
+        """Get detailed network interface configuration.
+
+        Returns:
+            List of raw interface dicts with address, DHCP, VLAN, and link state data.
+
+        """
+        query_str = """
+            query {
+                networkInterfaces {
+                    id
+                    name
+                    description
+                    ipAddress
+                    netmask
+                    gateway
+                    macAddress
+                    speed
+                    duplex
+                    mtu
+                    internal
+                    virtual
+                    useDhcp
+                    useDhcp6
+                    protocol
+                    operstate
+                    status
+                    type
+                    vlanId
+                    ipv4Addresses { address netmask }
+                    ipv6Address
+                    ipv6Gateway
+                    ipv6Netmask
+                    ipv6Addresses { address prefixLength }
+                }
+            }
+        """
+        result = await self.query(query_str)
+        return result.get("networkInterfaces") or []
+
+    async def typed_get_network_interfaces(
+        self,
+    ) -> list[InfoNetworkInterface]:
+        """Get detailed network interfaces as typed Pydantic models.
+
+        Returns:
+            List of InfoNetworkInterface instances.
+
+        """
+        from unraid_api.models import InfoNetworkInterface
+
+        data = await self.get_network_interfaces()
+        return [InfoNetworkInterface(**item) for item in data]
+
+    # =========================================================================
+    # Docker Organizer & Folder Management
+    # =========================================================================
+
+    async def get_docker_organizer(self, skip_cache: bool = False) -> dict[str, Any]:
+        """Get Docker container organizer hierarchy and folder views.
+
+        Args:
+            skip_cache: Whether to bypass backend caching.
+
+        Returns:
+            Raw organizer dictionary.
+
+        """
+        query_str = """
+            query GetDockerOrganizer($skipCache: Boolean) {
+                docker {
+                    organizer(skipCache: $skipCache) {
+                        version
+                        views {
+                            id
+                            name
+                            rootId
+                            prefs
+                            flatEntries {
+                                id
+                                name
+                                type
+                                parentId
+                                childrenIds
+                                depth
+                                hasChildren
+                                path
+                                position
+                            }
+                        }
+                    }
+                }
+            }
+        """
+        result = await self.query(query_str, {"skipCache": skip_cache})
+        docker_data = result.get("docker") or {}
+        return docker_data.get("organizer") or {}
+
+    async def typed_get_docker_organizer(
+        self, skip_cache: bool = False
+    ) -> ResolvedOrganizerV1:
+        """Get Docker organizer hierarchy as a typed Pydantic model.
+
+        Args:
+            skip_cache: Whether to bypass backend caching.
+
+        Returns:
+            ResolvedOrganizerV1 model instance.
+
+        """
+        from unraid_api.models import ResolvedOrganizerV1
+
+        data = await self.get_docker_organizer(skip_cache=skip_cache)
+        return ResolvedOrganizerV1(**data)
+
+    async def create_docker_folder(
+        self,
+        name: str,
+        parent_id: str | None = None,
+        children_ids: list[str] | None = None,
+    ) -> ResolvedOrganizerV1:
+        """Create a new Docker organizer folder.
+
+        Args:
+            name: Name of the new folder.
+            parent_id: Optional parent folder ID.
+            children_ids: Optional list of container IDs to place in folder.
+
+        Returns:
+            Updated ResolvedOrganizerV1 model.
+
+        """
+        from unraid_api.models import ResolvedOrganizerV1
+
+        mutation = """
+            mutation CreateDockerFolder(
+                $name: String!, $parentId: String, $childrenIds: [String!]
+            ) {
+                createDockerFolder(
+                    name: $name, parentId: $parentId, childrenIds: $childrenIds
+                ) {
+                    version
+                    views {
+                        id
+                        name
+                        rootId
+                        prefs
+                        flatEntries {
+                            id
+                            name
+                            type
+                            parentId
+                            childrenIds
+                            depth
+                            hasChildren
+                            path
+                            position
+                        }
+                    }
+                }
+            }
+        """
+        result = await self.mutate(
+            mutation,
+            {
+                "name": name,
+                "parentId": parent_id,
+                "childrenIds": children_ids or [],
+            },
+        )
+        return ResolvedOrganizerV1(**(result.get("createDockerFolder") or {}))
+
+    async def rename_docker_folder(
+        self, folder_id: str, new_name: str
+    ) -> ResolvedOrganizerV1:
+        """Rename an existing Docker organizer folder.
+
+        Args:
+            folder_id: ID of the folder to rename.
+            new_name: New name for the folder.
+
+        Returns:
+            Updated ResolvedOrganizerV1 model.
+
+        """
+        from unraid_api.models import ResolvedOrganizerV1
+
+        mutation = """
+            mutation RenameDockerFolder($folderId: String!, $newName: String!) {
+                renameDockerFolder(folderId: $folderId, newName: $newName) {
+                    version
+                    views {
+                        id
+                        name
+                        rootId
+                        prefs
+                        flatEntries {
+                            id
+                            name
+                            type
+                            parentId
+                            childrenIds
+                            depth
+                            hasChildren
+                            path
+                            position
+                        }
+                    }
+                }
+            }
+        """
+        result = await self.mutate(
+            mutation, {"folderId": folder_id, "newName": new_name}
+        )
+        return ResolvedOrganizerV1(**(result.get("renameDockerFolder") or {}))
+
+    async def delete_docker_entries(self, entry_ids: list[str]) -> ResolvedOrganizerV1:
+        """Delete entries (folders) from the Docker organizer.
+
+        Args:
+            entry_ids: List of folder/entry IDs to remove.
+
+        Returns:
+            Updated ResolvedOrganizerV1 model.
+
+        """
+        from unraid_api.models import ResolvedOrganizerV1
+
+        mutation = """
+            mutation DeleteDockerEntries($entryIds: [String!]!) {
+                deleteDockerEntries(entryIds: $entryIds) {
+                    version
+                    views {
+                        id
+                        name
+                        rootId
+                        prefs
+                        flatEntries {
+                            id
+                            name
+                            type
+                            parentId
+                            childrenIds
+                            depth
+                            hasChildren
+                            path
+                            position
+                        }
+                    }
+                }
+            }
+        """
+        result = await self.mutate(mutation, {"entryIds": entry_ids})
+        return ResolvedOrganizerV1(**(result.get("deleteDockerEntries") or {}))
+
+    async def move_docker_entries_to_folder(
+        self,
+        source_entry_ids: list[str],
+        destination_folder_id: str | None = None,
+    ) -> ResolvedOrganizerV1:
+        """Move Docker containers or folders into a target folder.
+
+        Args:
+            source_entry_ids: List of container/folder IDs to move.
+            destination_folder_id: Target folder ID (or None for root).
+
+        Returns:
+            Updated ResolvedOrganizerV1 model.
+
+        """
+        from unraid_api.models import ResolvedOrganizerV1
+
+        mutation = """
+            mutation MoveDockerEntries(
+                $sourceEntryIds: [String!]!, $destinationFolderId: String
+            ) {
+                moveDockerEntriesToFolder(
+                    sourceEntryIds: $sourceEntryIds,
+                    destinationFolderId: $destinationFolderId
+                ) {
+                    version
+                    views {
+                        id
+                        name
+                        rootId
+                        prefs
+                        flatEntries {
+                            id
+                            name
+                            type
+                            parentId
+                            childrenIds
+                            depth
+                            hasChildren
+                            path
+                            position
+                        }
+                    }
+                }
+            }
+        """
+        result = await self.mutate(
+            mutation,
+            {
+                "sourceEntryIds": source_entry_ids,
+                "destinationFolderId": destination_folder_id,
+            },
+        )
+        return ResolvedOrganizerV1(**(result.get("moveDockerEntriesToFolder") or {}))
+
+    async def update_container_autostart(
+        self,
+        entries: list[dict[str, Any]],
+        persist_user_preferences: bool = True,
+    ) -> bool:
+        """Update container autostart configuration.
+
+        Args:
+            entries: List of autostart entry dicts with id, autoStart,
+                autoStartOrder, and autoStartWait.
+            persist_user_preferences: Whether to persist user preferences.
+
+        Returns:
+            True if the configuration was saved successfully.
+
+        """
+        mutation = """
+            mutation UpdateAutostartConfig(
+                $entries: [AutostartConfigurationEntryInput!]!,
+                $persist: Boolean
+            ) {
+                docker {
+                    updateAutostartConfiguration(
+                        entries: $entries,
+                        persistUserPreferences: $persist
+                    )
+                }
+            }
+        """
+        result = await self.mutate(
+            mutation,
+            {"entries": entries, "persist": persist_user_preferences},
+        )
+        docker_data = result.get("docker") or {}
+        return bool(docker_data.get("updateAutostartConfiguration", False))
+
+    # =========================================================================
+    # Array & Disk Control Mutations
+    # =========================================================================
+
+    async def mount_array_disk(self, disk_id: str) -> ArrayDisk | None:
+        """Mount an individual array or pool disk.
+
+        Args:
+            disk_id: PrefixedID of the disk.
+
+        Returns:
+            Updated ArrayDisk model or None.
+
+        """
+        from unraid_api.models import ArrayDisk
+
+        mutation = """
+            mutation MountDisk($id: PrefixedID!) {
+                array {
+                    mountArrayDisk(id: $id) {
+                        id idx name device status temp isSpinning
+                    }
+                }
+            }
+        """
+        result = await self.mutate(mutation, {"id": disk_id})
+        array_data = result.get("array") or {}
+        disk_data = array_data.get("mountArrayDisk")
+        return ArrayDisk(**disk_data) if disk_data else None
+
+    async def unmount_array_disk(self, disk_id: str) -> ArrayDisk | None:
+        """Unmount an individual array or pool disk.
+
+        Args:
+            disk_id: PrefixedID of the disk.
+
+        Returns:
+            Updated ArrayDisk model or None.
+
+        """
+        from unraid_api.models import ArrayDisk
+
+        mutation = """
+            mutation UnmountDisk($id: PrefixedID!) {
+                array {
+                    unmountArrayDisk(id: $id) {
+                        id idx name device status temp isSpinning
+                    }
+                }
+            }
+        """
+        result = await self.mutate(mutation, {"id": disk_id})
+        array_data = result.get("array") or {}
+        disk_data = array_data.get("unmountArrayDisk")
+        return ArrayDisk(**disk_data) if disk_data else None
+
+    async def clear_array_disk_statistics(self, disk_id: str) -> bool:
+        """Clear/reset disk read, write, and error statistics.
+
+        Args:
+            disk_id: PrefixedID of the disk.
+
+        Returns:
+            True if statistics were cleared successfully.
+
+        """
+        mutation = """
+            mutation ClearDiskStats($id: PrefixedID!) {
+                array {
+                    clearArrayDiskStatistics(id: $id)
+                }
+            }
+        """
+        result = await self.mutate(mutation, {"id": disk_id})
+        array_data = result.get("array") or {}
+        return bool(array_data.get("clearArrayDiskStatistics", False))
+
+    # =========================================================================
+    # Plugin Management Queries & Operations
+    # =========================================================================
+
+    async def get_installed_unraid_plugins(self) -> list[str]:
+        """Get list of installed Unraid plugin identifiers/URLs.
+
+        Returns:
+            List of plugin file/package names.
+
+        """
+        query_str = """
+            query {
+                installedUnraidPlugins
+            }
+        """
+        result = await self.query(query_str)
+        return result.get("installedUnraidPlugins") or []
+
+    async def get_plugin_install_operations(
+        self,
+    ) -> list[PluginInstallOperation]:
+        """Get background plugin install operations.
+
+        Returns:
+            List of PluginInstallOperation models.
+
+        """
+        from unraid_api.models import PluginInstallOperation
+
+        query_str = """
+            query {
+                pluginInstallOperations {
+                    id name url status output createdAt updatedAt finishedAt
+                }
+            }
+        """
+        result = await self.query(query_str)
+        items = result.get("pluginInstallOperations") or []
+        return [PluginInstallOperation(**op) for op in items]
+
+    async def get_plugin_install_operation(
+        self, operation_id: str
+    ) -> PluginInstallOperation | None:
+        """Get status of a specific plugin install operation.
+
+        Args:
+            operation_id: ID of the operation.
+
+        Returns:
+            PluginInstallOperation instance or None.
+
+        """
+        from unraid_api.models import PluginInstallOperation
+
+        query_str = """
+            query GetPluginInstallOp($operationId: ID!) {
+                pluginInstallOperation(operationId: $operationId) {
+                    id name url status output createdAt updatedAt finishedAt
+                }
+            }
+        """
+        result = await self.query(query_str, {"operationId": operation_id})
+        op = result.get("pluginInstallOperation")
+        return PluginInstallOperation(**op) if op else None
+
+    # =========================================================================
+    # Server Queries & Identity Mutations
+    # =========================================================================
+
+    async def get_servers(self) -> list[dict[str, Any]]:
+        """Get all servers in the Unraid Connect/local network.
+
+        Returns:
+            List of raw server dicts.
+
+        """
+        query_str = """
+            query {
+                servers {
+                    id name guid lanip wanip localurl remoteurl status comment apikey
+                    owner { id username avatar url }
+                }
+            }
+        """
+        result = await self.query(query_str)
+        return result.get("servers") or []
+
+    async def typed_get_servers(self) -> list[Server]:
+        """Get all servers in the network as typed Pydantic models.
+
+        Returns:
+            List of Server models.
+
+        """
+        from unraid_api.models import Server
+
+        data = await self.get_servers()
+        return [Server(**s) for s in data]
+
+    async def get_server(self) -> dict[str, Any]:
+        """Get current server identity as a raw dictionary.
+
+        Returns:
+            Server data dictionary or empty dictionary.
+
+        """
+        query_str = """
+            query {
+                server {
+                    id name guid lanip wanip localurl remoteurl status comment apikey
+                    owner { id username avatar url }
+                }
+            }
+        """
+        result = await self.query(query_str)
+        return dict(result.get("server") or {})
+
+    async def typed_get_server(self) -> Server | None:
+        """Get current server identity as a typed Pydantic model.
+
+        Returns:
+            Server model instance or None.
+
+        """
+        from unraid_api.models import Server
+
+        data = await self.get_server()
+        return Server(**data) if data else None
+
+    async def update_server_identity(
+        self,
+        name: str | None = None,
+        comment: str | None = None,
+        sys_model: str | None = None,
+    ) -> Server:
+        """Update server name, comment, or model.
+
+        Args:
+            name: New server name.
+            comment: New server description.
+            sys_model: Custom system model string.
+
+        Returns:
+            Updated Server model instance.
+
+        """
+        from unraid_api.models import Server
+
+        mutation = """
+            mutation UpdateServerIdentity(
+                $name: String, $comment: String, $sysModel: String
+            ) {
+                updateServerIdentity(
+                    name: $name, comment: $comment, sysModel: $sysModel
+                ) {
+                    id
+                    name
+                    comment
+                    guid
+                    lanip
+                    wanip
+                    localurl
+                    remoteurl
+                    status
+                    apikey
+                }
+            }
+        """
+        variables: dict[str, Any] = {}
+        if name is not None:
+            variables["name"] = name
+        if comment is not None:
+            variables["comment"] = comment
+        if sys_model is not None:
+            variables["sysModel"] = sys_model
+        result = await self.mutate(mutation, variables)
+        return Server(**(result.get("updateServerIdentity") or {}))
+
+    # =========================================================================
+    # Batch Notification Mutations
+    # =========================================================================
+
+    async def archive_notifications(
+        self, notification_ids: list[str]
+    ) -> NotificationOverview:
+        """Archive multiple notifications by ID.
+
+        Args:
+            notification_ids: List of notification PrefixedIDs.
+
+        Returns:
+            Updated NotificationOverview model.
+
+        """
+        from unraid_api.models import NotificationOverview
+
+        mutation = """
+            mutation ArchiveNotifications($ids: [PrefixedID!]!) {
+                archiveNotifications(ids: $ids) {
+                    unread { total info warning alert }
+                    archive { total info warning alert }
+                }
+            }
+        """
+        result = await self.mutate(mutation, {"ids": notification_ids})
+        return NotificationOverview(**(result.get("archiveNotifications") or {}))
+
+    async def unarchive_notifications(
+        self, notification_ids: list[str]
+    ) -> NotificationOverview:
+        """Unarchive multiple notifications by ID.
+
+        Args:
+            notification_ids: List of notification PrefixedIDs.
+
+        Returns:
+            Updated NotificationOverview model.
+
+        """
+        from unraid_api.models import NotificationOverview
+
+        mutation = """
+            mutation UnarchiveNotifications($ids: [PrefixedID!]!) {
+                unarchiveNotifications(ids: $ids) {
+                    unread { total info warning alert }
+                    archive { total info warning alert }
+                }
+            }
+        """
+        result = await self.mutate(mutation, {"ids": notification_ids})
+        return NotificationOverview(**(result.get("unarchiveNotifications") or {}))
+
+    async def unarchive_all_notifications(
+        self, importance: str | None = None
+    ) -> NotificationOverview:
+        """Unarchive all notifications (optionally filtered by importance).
+
+        Args:
+            importance: Optional importance filter (e.g., "ALERT", "WARNING", "INFO").
+
+        Returns:
+            Updated NotificationOverview model.
+
+        """
+        from unraid_api.models import NotificationOverview
+
+        mutation = """
+            mutation UnarchiveAll($importance: NotificationImportance) {
+                unarchiveAll(importance: $importance) {
+                    unread { total info warning alert }
+                    archive { total info warning alert }
+                }
+            }
+        """
+        result = await self.mutate(mutation, {"importance": importance})
+        return NotificationOverview(**(result.get("unarchiveAll") or {}))
+
+    async def recalculate_notification_overview(
+        self,
+    ) -> NotificationOverview:
+        """Recalculate notification counts overview.
+
+        Returns:
+            Updated NotificationOverview model.
+
+        """
+        from unraid_api.models import NotificationOverview
+
+        mutation = """
+            mutation {
+                recalculateOverview {
+                    unread { total info warning alert }
+                    archive { total info warning alert }
+                }
+            }
+        """
+        result = await self.mutate(mutation)
+        return NotificationOverview(**(result.get("recalculateOverview") or {}))
+
+    # =========================================================================
+    # Additional Subscriptions (Owner, Servers, Plugin Updates)
+    # =========================================================================
+
+    async def subscribe_owner(self) -> AsyncGenerator[Owner, None]:
+        """Subscribe to server owner profile changes (username, avatar, url).
+
+        Yields:
+            Owner model on each update.
+
+        """
+        from unraid_api.models import Owner
+
+        subscription = """
+            subscription {
+                ownerSubscription {
+                    username avatar url
+                }
+            }
+        """
+        async for payload in self.subscribe(subscription):
+            data = payload.get("ownerSubscription")
+            if data:
+                yield Owner(**data)
+
+    async def subscribe_servers(self) -> AsyncGenerator[Server, None]:
+        """Subscribe to server status and identity changes.
+
+        Yields:
+            Server model on each update.
+
+        """
+        from unraid_api.models import Server
+
+        subscription = """
+            subscription {
+                serversSubscription {
+                    id name guid lanip wanip localurl remoteurl status comment apikey
+                    owner { id username avatar url }
+                }
+            }
+        """
+        async for payload in self.subscribe(subscription):
+            data = payload.get("serversSubscription")
+            if data:
+                yield Server(**data)
+
+    async def subscribe_plugin_install_updates(
+        self, operation_id: str
+    ) -> AsyncGenerator[PluginInstallEvent, None]:
+        """Subscribe to real-time progress and logs for a plugin install operation.
+
+        Args:
+            operation_id: The ID of the plugin install operation to track.
+
+        Yields:
+            PluginInstallEvent model for each log line or state transition.
+
+        """
+        from unraid_api.models import PluginInstallEvent
+
+        subscription = """
+            subscription PluginInstallUpdates($operationId: ID!) {
+                pluginInstallUpdates(operationId: $operationId) {
+                    operationId status output timestamp
+                }
+            }
+        """
+        async for payload in self.subscribe(
+            subscription, {"operationId": operation_id}
+        ):
+            data = payload.get("pluginInstallUpdates")
+            if data:
+                yield PluginInstallEvent(**data)

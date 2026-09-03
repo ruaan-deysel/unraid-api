@@ -7342,3 +7342,430 @@ class TestDockerBulkUpdateMethods:
         )
         with pytest.raises(UnraidAPIError, match="refreshDockerDigests"):
             await client.refresh_docker_digests()
+
+
+# =============================================================================
+# v4.37.x Client Methods Tests
+# =============================================================================
+
+
+class TestNetworkInterfacesMethods:
+    """Tests for get_network_interfaces and typed_get_network_interfaces."""
+
+    async def test_get_network_interfaces(self) -> None:
+        payload = {
+            "data": {
+                "networkInterfaces": [
+                    {
+                        "id": "interface:eth0",
+                        "name": "eth0",
+                        "description": "NIC 1",
+                        "ipAddress": "192.168.1.50",
+                        "macAddress": "00:11:22:33:44:55",
+                        "speed": 1000,
+                        "status": "UP",
+                    }
+                ]
+            }
+        }
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
+            m.post("http://unraid.test/graphql", payload=payload)
+            m.post("http://unraid.test/graphql", payload=payload)
+
+            async with UnraidClient(
+                "unraid.test", "test-key", verify_ssl=False
+            ) as client:
+                res = await client.get_network_interfaces()
+                assert len(res) == 1
+                assert res[0]["name"] == "eth0"
+                assert res[0]["macAddress"] == "00:11:22:33:44:55"
+
+                typed_res = await client.typed_get_network_interfaces()
+                assert len(typed_res) == 1
+                assert typed_res[0].name == "eth0"
+                assert typed_res[0].speed == 1000
+                assert typed_res[0].macAddress == "00:11:22:33:44:55"
+                assert typed_res[0].mac == "00:11:22:33:44:55"
+
+
+class TestDockerOrganizerMethods:
+    """Tests for Docker organizer queries and folder mutations."""
+
+    async def test_docker_organizer_methods(self) -> None:
+        org_payload = {
+            "data": {
+                "docker": {
+                    "organizer": {
+                        "version": 1.0,
+                        "views": [{"id": "view:1", "name": "Main", "flatEntries": []}],
+                    }
+                }
+            }
+        }
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
+            m.post("http://unraid.test/graphql", payload=org_payload)
+            m.post("http://unraid.test/graphql", payload=org_payload)
+            m.post(
+                "http://unraid.test/graphql",
+                payload={
+                    "data": {
+                        "createDockerFolder": {
+                            "version": 1.0,
+                            "views": [
+                                {"id": "view:1", "name": "Main", "flatEntries": []}
+                            ],
+                        }
+                    }
+                },
+            )
+            m.post(
+                "http://unraid.test/graphql",
+                payload={
+                    "data": {
+                        "renameDockerFolder": {
+                            "version": 1.0,
+                            "views": [
+                                {"id": "view:1", "name": "Renamed", "flatEntries": []}
+                            ],
+                        }
+                    }
+                },
+            )
+            m.post(
+                "http://unraid.test/graphql",
+                payload={
+                    "data": {
+                        "deleteDockerEntries": {
+                            "version": 1.0,
+                            "views": [
+                                {"id": "view:1", "name": "Main", "flatEntries": []}
+                            ],
+                        }
+                    }
+                },
+            )
+            m.post(
+                "http://unraid.test/graphql",
+                payload={
+                    "data": {
+                        "moveDockerEntriesToFolder": {
+                            "version": 1.0,
+                            "views": [
+                                {"id": "view:1", "name": "Main", "flatEntries": []}
+                            ],
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "unraid.test", "test-key", verify_ssl=False
+            ) as client:
+                org = await client.get_docker_organizer()
+                assert org["version"] == 1.0
+
+                typed_org = await client.typed_get_docker_organizer()
+                assert typed_org.version == 1.0
+
+                created = await client.create_docker_folder(
+                    "Media", children_ids=["c1"]
+                )
+                assert created.version == 1.0
+
+                renamed = await client.rename_docker_folder("folder:1", "NewMedia")
+                assert renamed.views[0].name == "Renamed"
+
+                deleted = await client.delete_docker_entries(["folder:1"])
+                assert deleted.version == 1.0
+
+                moved = await client.move_docker_entries_to_folder(["c1"], "folder:2")
+                assert moved.version == 1.0
+
+
+class TestArrayDiskMutations:
+    """Tests for mount, unmount, and clear statistics disk mutations."""
+
+    async def test_array_disk_mutations(self) -> None:
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
+            m.post(
+                "http://unraid.test/graphql",
+                payload={
+                    "data": {
+                        "array": {
+                            "mountArrayDisk": {
+                                "id": "disk:1",
+                                "name": "disk1",
+                                "status": "DISK_OK",
+                                "isSpinning": True,
+                            }
+                        }
+                    }
+                },
+            )
+            m.post(
+                "http://unraid.test/graphql",
+                payload={
+                    "data": {
+                        "array": {
+                            "unmountArrayDisk": {
+                                "id": "disk:1",
+                                "name": "disk1",
+                                "status": "DISK_NP",
+                                "isSpinning": False,
+                            }
+                        }
+                    }
+                },
+            )
+            m.post(
+                "http://unraid.test/graphql",
+                payload={
+                    "data": {
+                        "array": {
+                            "clearArrayDiskStatistics": True,
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "unraid.test", "test-key", verify_ssl=False
+            ) as client:
+                mounted = await client.mount_array_disk("disk:1")
+                assert mounted is not None
+                assert mounted.isSpinning is True
+
+                unmounted = await client.unmount_array_disk("disk:1")
+                assert unmounted is not None
+                assert unmounted.isSpinning is False
+
+                cleared = await client.clear_array_disk_statistics("disk:1")
+                assert cleared is True
+
+
+class TestPluginOperationsMethods:
+    """Tests for plugin queries and background operation tracking."""
+
+    async def test_plugin_methods(self) -> None:
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
+            m.post(
+                "http://unraid.test/graphql",
+                payload={
+                    "data": {
+                        "installedUnraidPlugins": [
+                            "community.applications.plg",
+                            "unassigned.devices.plg",
+                        ]
+                    }
+                },
+            )
+            m.post(
+                "http://unraid.test/graphql",
+                payload={
+                    "data": {
+                        "pluginInstallOperations": [
+                            {"id": "op:1", "name": "test.plg", "status": "COMPLETED"}
+                        ]
+                    }
+                },
+            )
+            m.post(
+                "http://unraid.test/graphql",
+                payload={
+                    "data": {
+                        "pluginInstallOperation": {
+                            "id": "op:1",
+                            "name": "test.plg",
+                            "status": "COMPLETED",
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "unraid.test", "test-key", verify_ssl=False
+            ) as client:
+                installed = await client.get_installed_unraid_plugins()
+                assert len(installed) == 2
+                assert installed[0] == "community.applications.plg"
+
+                ops = await client.get_plugin_install_operations()
+                assert len(ops) == 1
+                assert ops[0].status == "COMPLETED"
+
+                op = await client.get_plugin_install_operation("op:1")
+                assert op is not None
+                assert op.id == "op:1"
+
+
+class TestServerMethods:
+    """Tests for server query and update methods."""
+
+    async def test_server_methods(self) -> None:
+        servers_payload = {
+            "data": {
+                "servers": [{"id": "server:1", "name": "Tower", "status": "ONLINE"}]
+            }
+        }
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
+            m.post("http://unraid.test/graphql", payload=servers_payload)
+            m.post("http://unraid.test/graphql", payload=servers_payload)
+            m.post(
+                "http://unraid.test/graphql",
+                payload={
+                    "data": {
+                        "server": {
+                            "id": "server:1",
+                            "name": "Tower",
+                            "status": "ONLINE",
+                        }
+                    }
+                },
+            )
+            m.post(
+                "http://unraid.test/graphql",
+                payload={
+                    "data": {
+                        "server": {
+                            "id": "server:1",
+                            "name": "Tower",
+                            "status": "ONLINE",
+                        }
+                    }
+                },
+            )
+            m.post(
+                "http://unraid.test/graphql",
+                payload={"data": {"server": None}},
+            )
+            m.post(
+                "http://unraid.test/graphql",
+                payload={
+                    "data": {
+                        "updateServerIdentity": {
+                            "id": "server:1",
+                            "name": "Tower-Updated",
+                            "status": "ONLINE",
+                        }
+                    }
+                },
+            )
+            m.post(
+                "http://unraid.test/graphql",
+                payload={
+                    "data": {
+                        "updateServerIdentity": {
+                            "id": "server:1",
+                            "name": "Tower",
+                            "status": "ONLINE",
+                        }
+                    }
+                },
+            )
+
+            async with UnraidClient(
+                "unraid.test", "test-key", verify_ssl=False
+            ) as client:
+                servers = await client.get_servers()
+                assert len(servers) == 1
+                assert servers[0]["name"] == "Tower"
+
+                typed_servers = await client.typed_get_servers()
+                assert len(typed_servers) == 1
+                assert typed_servers[0].name == "Tower"
+
+                server_raw = await client.get_server()
+                assert isinstance(server_raw, dict)
+                assert server_raw["id"] == "server:1"
+
+                typed_server = await client.typed_get_server()
+                assert typed_server is not None
+                assert typed_server.id == "server:1"
+
+                none_server = await client.typed_get_server()
+                assert none_server is None
+
+                updated = await client.update_server_identity(
+                    name="Tower-Updated",
+                    comment="Primary NAS",
+                    sys_model="Custom Build",
+                )
+                assert updated.name == "Tower-Updated"
+
+                updated_empty = await client.update_server_identity()
+                assert updated_empty.name == "Tower"
+
+
+class TestNotificationBatchMutations:
+    """Tests for bulk notification archive, unarchive, and recalculate."""
+
+    async def test_batch_notification_mutations(self) -> None:
+        overview_data = {
+            "unread": {"total": 0, "info": 0, "warning": 0, "alert": 0},
+            "archive": {"total": 5, "info": 3, "warning": 1, "alert": 1},
+        }
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
+            m.post(
+                "http://unraid.test/graphql",
+                payload={"data": {"archiveNotifications": overview_data}},
+            )
+            m.post(
+                "http://unraid.test/graphql",
+                payload={"data": {"unarchiveNotifications": overview_data}},
+            )
+            m.post(
+                "http://unraid.test/graphql",
+                payload={"data": {"unarchiveAll": overview_data}},
+            )
+            m.post(
+                "http://unraid.test/graphql",
+                payload={"data": {"recalculateOverview": overview_data}},
+            )
+
+            async with UnraidClient(
+                "unraid.test", "test-key", verify_ssl=False
+            ) as client:
+                archived = await client.archive_notifications(["n1", "n2"])
+                assert archived.archive.total == 5
+
+                unarchived = await client.unarchive_notifications(["n1"])
+                assert unarchived.archive.total == 5
+
+                all_unarchived = await client.unarchive_all_notifications()
+                assert all_unarchived.archive.total == 5
+
+                recalculated = await client.recalculate_notification_overview()
+                assert recalculated.archive.total == 5
+
+
+class TestContainerAutostartMutation:
+    """Tests for update_container_autostart."""
+
+    async def test_update_container_autostart(self) -> None:
+        async with aiointercept(mock_external_urls=True) as m:
+            m.get("http://unraid.test/graphql", status=400)
+            m.post(
+                "http://unraid.test/graphql",
+                payload={"data": {"docker": {"updateAutostartConfiguration": True}}},
+            )
+
+            async with UnraidClient(
+                "unraid.test", "test-key", verify_ssl=False
+            ) as client:
+                res = await client.update_container_autostart(
+                    [
+                        {
+                            "id": "container:1",
+                            "autoStart": True,
+                            "autoStartOrder": 1,
+                            "autoStartWait": 0,
+                        }
+                    ]
+                )
+                assert res is True

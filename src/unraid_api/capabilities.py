@@ -25,6 +25,11 @@ CAPABILITY_TYPES: tuple[str, ...] = (
     "UnraidArray",
     "Metrics",
     "DockerMutations",
+    "ArrayMutations",
+    "InfoNetworkInterface",
+    "ResolvedOrganizerV1",
+    "Server",
+    "PluginInstallOperation",
 )
 
 

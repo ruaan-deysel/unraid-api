@@ -896,3 +896,115 @@ class TestTypedSubscriptions:
         assert results[0].progress == 42
         assert results[0].speed == "150.5 MB/s"
         assert results[0].correcting is True
+
+    async def test_subscribe_owner(self, ws_client: UnraidClient) -> None:
+        """subscribe_owner yields Owner models."""
+        from unraid_api.models import Owner
+
+        ack = _ws_text_msg({"type": "connection_ack"})
+        next_msg = _ws_text_msg(
+            {
+                "id": "test",
+                "type": "next",
+                "payload": {
+                    "data": {
+                        "ownerSubscription": {
+                            "username": "admin",
+                            "avatar": "https://avatar.url",
+                            "url": "https://profile.url",
+                        }
+                    }
+                },
+            }
+        )
+        empty_msg = _ws_text_msg({"id": "test", "type": "next", "payload": {}})
+        complete = _ws_text_msg({"id": "test", "type": "complete"})
+
+        ws = MockWebSocket([ack, empty_msg, next_msg, complete])
+        ws_client._session.ws_connect = AsyncMock(return_value=ws)  # type: ignore[union-attr]
+
+        results: list[Owner] = []
+        async for owner in ws_client.subscribe_owner():
+            results.append(owner)
+
+        assert len(results) == 1
+        assert isinstance(results[0], Owner)
+        assert results[0].username == "admin"
+
+    async def test_subscribe_servers(self, ws_client: UnraidClient) -> None:
+        """subscribe_servers yields Server models."""
+        from unraid_api.models import Server
+
+        ack = _ws_text_msg({"type": "connection_ack"})
+        next_msg = _ws_text_msg(
+            {
+                "id": "test",
+                "type": "next",
+                "payload": {
+                    "data": {
+                        "serversSubscription": {
+                            "id": "server:1",
+                            "name": "Tower",
+                            "status": "ONLINE",
+                        }
+                    }
+                },
+            }
+        )
+        empty_msg = _ws_text_msg({"id": "test", "type": "next", "payload": {}})
+        complete = _ws_text_msg({"id": "test", "type": "complete"})
+
+        ws = MockWebSocket([ack, empty_msg, next_msg, complete])
+        ws_client._session.ws_connect = AsyncMock(return_value=ws)  # type: ignore[union-attr]
+
+        results: list[Server] = []
+        async for s in ws_client.subscribe_servers():
+            results.append(s)
+
+        assert len(results) == 1
+        assert isinstance(results[0], Server)
+        assert results[0].name == "Tower"
+
+    async def test_subscribe_plugin_install_updates(
+        self, ws_client: UnraidClient
+    ) -> None:
+        """subscribe_plugin_install_updates yields PluginInstallEvent models."""
+        from unraid_api.models import PluginInstallEvent
+
+        ack = _ws_text_msg({"type": "connection_ack"})
+        next_msg = _ws_text_msg(
+            {
+                "id": "test",
+                "type": "next",
+                "payload": {
+                    "data": {
+                        "pluginInstallUpdates": {
+                            "operationId": "op:1",
+                            "status": "RUNNING",
+                            "output": ["Extracting files..."],
+                            "timestamp": "2026-09-02T00:00:01Z",
+                        }
+                    }
+                },
+            }
+        )
+        empty_msg = _ws_text_msg({"id": "test", "type": "next", "payload": {}})
+        complete = _ws_text_msg({"id": "test", "type": "complete"})
+
+        ws = MockWebSocket([ack, empty_msg, next_msg, complete])
+        ws_client._session.ws_connect = AsyncMock(return_value=ws)  # type: ignore[union-attr]
+
+        results: list[PluginInstallEvent] = []
+        async for evt in ws_client.subscribe_plugin_install_updates("op:1"):
+            results.append(evt)
+
+        assert len(results) == 1
+        assert isinstance(results[0], PluginInstallEvent)
+        assert results[0].operationId == "op:1"
+        assert results[0].status == "RUNNING"
+
+        # Assert variable and type were forwarded in subscribe payload
+        subscribe_frame = json.loads(ws._send_history[1])
+        assert subscribe_frame["type"] == "subscribe"
+        assert "$operationId: ID!" in subscribe_frame["payload"]["query"]
+        assert subscribe_frame["payload"]["variables"] == {"operationId": "op:1"}

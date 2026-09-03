@@ -63,19 +63,33 @@ def _sanitize_host(host: str) -> str:
 
 
 def load_env() -> tuple[str, str]:
-    """Load host and API key from scripts/.env or environment variables."""
+    """Load host and API key from scripts/.env, .env, or environment variables."""
     host = os.environ.get("UNRAID_HOST", "")
     api_key = os.environ.get("UNRAID_API_KEY", "")
 
     if not host or not api_key:
-        env_path = Path(__file__).resolve().parent / ".env"
-        if env_path.exists():
-            for raw_line in env_path.read_text().strip().splitlines():
-                line = raw_line.strip()
-                if line.startswith("IP:"):
-                    host = host or line.split(":", 1)[1].strip()
-                elif line.startswith("API Key:"):
-                    api_key = api_key or line.split(":", 1)[1].strip()
+        env_paths = [
+            Path(__file__).resolve().parent / ".env",
+            Path(__file__).resolve().parent.parent / ".env",
+        ]
+        for env_path in env_paths:
+            if env_path.exists():
+                lines = [line.strip() for line in env_path.read_text().splitlines()]
+                for i, line in enumerate(lines):
+                    if line.startswith("IP:"):
+                        host = host or line.split(":", 1)[1].strip()
+                    elif line.startswith("API Key:"):
+                        api_key = api_key or line.split(":", 1)[1].strip()
+                    elif line == "Unraid IP Address:" and i + 1 < len(lines):
+                        host = host or lines[i + 1]
+                    elif line == "Unraid API Key:" and i + 1 < len(lines):
+                        api_key = api_key or lines[i + 1]
+                    elif line.startswith("UNRAID_HOST="):
+                        host = host or line.split("=", 1)[1].strip().strip('"\'')
+                    elif line.startswith("UNRAID_API_KEY="):
+                        api_key = api_key or line.split("=", 1)[1].strip().strip('"\'')
+            if host and api_key:
+                break
 
     if not host or not api_key:
         print("ERROR: Could not find credentials.")
@@ -711,7 +725,21 @@ async def run_live_method_tests(client: UnraidClient) -> list[LiveTestResult]:
         ("get_docker_port_conflicts", "Port conflicts"),
     ]
 
-    all_methods = raw_methods + typed_methods + v430_methods
+    # v4.35.0+ / Unraid 7.3 methods
+    v435_methods: list[tuple[str, str]] = [
+        ("get_network_interfaces", "Network interfaces raw"),
+        ("typed_get_network_interfaces", "Network interfaces typed"),
+        ("get_docker_organizer", "Docker organizer raw"),
+        ("typed_get_docker_organizer", "Docker organizer typed"),
+        ("get_installed_unraid_plugins", "Installed plugins"),
+        ("get_plugin_install_operations", "Plugin install operations"),
+        ("get_servers", "Servers raw"),
+        ("typed_get_servers", "Servers typed"),
+        ("get_server", "Current server raw"),
+        ("typed_get_server", "Current server typed"),
+    ]
+
+    all_methods = raw_methods + typed_methods + v430_methods + v435_methods
 
     for method_name, description in all_methods:
         method = getattr(client, method_name, None)
@@ -720,7 +748,7 @@ async def run_live_method_tests(client: UnraidClient) -> list[LiveTestResult]:
                 LiveTestResult(
                     method_name=method_name,
                     status="SKIP",
-                    message=f"Method not found on client",
+                    message="Method not found on client",
                 )
             )
             continue
@@ -804,6 +832,13 @@ def compare_models_to_schema(
         "Flash": ["Flash"],
         "Owner": ["Owner"],
         "Plugin": ["Plugin"],
+        "InfoNetworkInterface": ["InfoNetworkInterface", "NetworkInterface"],
+        "ResolvedOrganizerV1": ["ResolvedOrganizerV1"],
+        "ResolvedOrganizerView": ["ResolvedOrganizerView"],
+        "Server": ["Server"],
+        "ProfileModel": ["ProfileModel"],
+        "PluginInstallOperation": ["PluginInstallOperation"],
+        "PluginInstallEvent": ["PluginInstallEvent"],
     }
 
     for model_name, possible_gql_types in model_to_gql_type.items():
