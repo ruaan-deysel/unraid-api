@@ -173,7 +173,7 @@ class InfoCpu(UnraidBaseModel):
     cache: dict[str, Any] | None = None
     flags: list[str] = []
     topology: list[Any] = []
-    packages: CpuPackages = CpuPackages()
+    packages: CpuPackages = Field(default_factory=CpuPackages)
 
 
 class InfoOs(UnraidBaseModel):
@@ -221,7 +221,7 @@ class InfoVersions(UnraidBaseModel):
     """Version information container."""
 
     id: str | None = None
-    core: CoreVersions = CoreVersions()
+    core: CoreVersions = Field(default_factory=CoreVersions)
     packages: PackageVersions | None = None
 
 
@@ -409,14 +409,14 @@ class SystemInfo(UnraidBaseModel):
 
     id: str | None = None
     time: ParsedDatetime = None
-    system: InfoSystem = InfoSystem()
-    cpu: InfoCpu = InfoCpu()
-    os: InfoOs = InfoOs()
-    versions: InfoVersions = InfoVersions()
-    memory: InfoMemory = InfoMemory()
-    display: InfoDisplay = InfoDisplay()
-    devices: InfoDevices = InfoDevices()
-    baseboard: InfoBaseboard = InfoBaseboard()
+    system: InfoSystem = Field(default_factory=InfoSystem)
+    cpu: InfoCpu = Field(default_factory=InfoCpu)
+    os: InfoOs = Field(default_factory=InfoOs)
+    versions: InfoVersions = Field(default_factory=InfoVersions)
+    memory: InfoMemory = Field(default_factory=InfoMemory)
+    display: InfoDisplay = Field(default_factory=InfoDisplay)
+    devices: InfoDevices = Field(default_factory=InfoDevices)
+    baseboard: InfoBaseboard = Field(default_factory=InfoBaseboard)
     networkInterfaces: list[InfoNetworkInterface] = []
     primaryNetwork: InfoNetworkInterface | None = None
 
@@ -451,8 +451,8 @@ class MemoryUtilization(UnraidBaseModel):
 class Metrics(UnraidBaseModel):
     """System metrics container."""
 
-    cpu: CpuUtilization = CpuUtilization()
-    memory: MemoryUtilization = MemoryUtilization()
+    cpu: CpuUtilization = Field(default_factory=CpuUtilization)
+    memory: MemoryUtilization = Field(default_factory=MemoryUtilization)
 
 
 # =============================================================================
@@ -698,7 +698,7 @@ class CapacityKilobytes(UnraidBaseModel):
 class ArrayCapacity(UnraidBaseModel):
     """Array capacity information."""
 
-    kilobytes: CapacityKilobytes = CapacityKilobytes()
+    kilobytes: CapacityKilobytes = Field(default_factory=CapacityKilobytes)
 
     @property
     def total_bytes(self) -> int:
@@ -869,8 +869,8 @@ class UnraidArray(UnraidBaseModel):
 
     id: str | None = None
     state: str | None = None
-    capacity: ArrayCapacity = ArrayCapacity()
-    parityCheckStatus: ParityCheck = ParityCheck()
+    capacity: ArrayCapacity = Field(default_factory=ArrayCapacity)
+    parityCheckStatus: ParityCheck = Field(default_factory=ParityCheck)
     disks: list[ArrayDisk] = []
     parities: list[ArrayDisk] = []
     caches: list[ArrayDisk] = []
@@ -1211,8 +1211,8 @@ class UPSDevice(UnraidBaseModel):
     name: str
     model: str | None = None
     status: str | None = None
-    battery: UPSBattery = UPSBattery()
-    power: UPSPower = UPSPower()
+    battery: UPSBattery = Field(default_factory=UPSBattery)
+    power: UPSPower = Field(default_factory=UPSPower)
 
     @property
     def is_connected(self) -> bool:
@@ -1324,8 +1324,12 @@ class NotificationOverviewCounts(UnraidBaseModel):
 class NotificationOverview(UnraidBaseModel):
     """Notification overview with counts."""
 
-    unread: NotificationOverviewCounts = NotificationOverviewCounts()
-    archive: NotificationOverviewCounts = NotificationOverviewCounts()
+    unread: NotificationOverviewCounts = Field(
+        default_factory=NotificationOverviewCounts
+    )
+    archive: NotificationOverviewCounts = Field(
+        default_factory=NotificationOverviewCounts
+    )
 
 
 class AccessUrl(UnraidBaseModel):
@@ -1820,10 +1824,10 @@ class PluginInstallOperation(UnraidBaseModel):
     name: str | None = None
     url: str | None = None
     status: str | None = None
-    output: list[str] = []
-    createdAt: str | None = None
-    updatedAt: str | None = None
-    finishedAt: str | None = None
+    output: list[str] = Field(default_factory=list)
+    createdAt: ParsedDatetime = None
+    updatedAt: ParsedDatetime = None
+    finishedAt: ParsedDatetime = None
 
 
 class PluginInstallEvent(UnraidBaseModel):
@@ -1831,8 +1835,8 @@ class PluginInstallEvent(UnraidBaseModel):
 
     operationId: str
     status: str | None = None
-    output: list[str] = []
-    timestamp: str | None = None
+    output: list[str] = Field(default_factory=list)
+    timestamp: ParsedDatetime = None
 
 
 # =============================================================================

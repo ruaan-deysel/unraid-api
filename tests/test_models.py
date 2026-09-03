@@ -4032,6 +4032,8 @@ class TestPluginInstallModels:
     """Tests for PluginInstallOperation and PluginInstallEvent."""
 
     def test_plugin_install_operation(self) -> None:
+        from datetime import UTC
+
         from unraid_api.models import PluginInstallOperation
 
         data = {
@@ -4049,8 +4051,11 @@ class TestPluginInstallModels:
         assert op.status == "COMPLETED"
         assert len(op.output) == 2
         assert op.output[1] == "Plugin installed successfully"
+        assert op.createdAt == datetime(2026, 9, 2, 0, 0, tzinfo=UTC)
 
     def test_plugin_install_event(self) -> None:
+        from datetime import UTC
+
         from unraid_api.models import PluginInstallEvent
 
         event = PluginInstallEvent(
@@ -4062,6 +4067,7 @@ class TestPluginInstallModels:
         assert event.operationId == "op:123"
         assert event.status == "RUNNING"
         assert event.output == ["Downloading package..."]
+        assert event.timestamp == datetime(2026, 9, 2, 0, 0, 30, tzinfo=UTC)
 
 
 class TestExtendedHardwareModels:
