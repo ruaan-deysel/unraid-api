@@ -735,7 +735,8 @@ async def run_live_method_tests(client: UnraidClient) -> list[LiveTestResult]:
         ("get_plugin_install_operations", "Plugin install operations"),
         ("get_servers", "Servers raw"),
         ("typed_get_servers", "Servers typed"),
-        ("get_server", "Current server"),
+        ("get_server", "Current server raw"),
+        ("typed_get_server", "Current server typed"),
     ]
 
     all_methods = raw_methods + typed_methods + v430_methods + v435_methods

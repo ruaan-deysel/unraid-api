@@ -1003,7 +1003,8 @@ class TestTypedSubscriptions:
         assert results[0].operationId == "op:1"
         assert results[0].status == "RUNNING"
 
-        # Assert variable was forwarded in subscribe payload
+        # Assert variable and type were forwarded in subscribe payload
         subscribe_frame = json.loads(ws._send_history[1])
         assert subscribe_frame["type"] == "subscribe"
+        assert "$operationId: ID!" in subscribe_frame["payload"]["query"]
         assert subscribe_frame["payload"]["variables"] == {"operationId": "op:1"}

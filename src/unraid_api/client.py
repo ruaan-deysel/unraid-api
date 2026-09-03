@@ -5427,15 +5427,13 @@ class UnraidClient:
         data = await self.get_servers()
         return [Server(**s) for s in data]
 
-    async def get_server(self) -> Server | None:
-        """Get current server identity as a typed Pydantic model.
+    async def get_server(self) -> dict[str, Any]:
+        """Get current server identity as a raw dictionary.
 
         Returns:
-            Server model instance or None.
+            Server data dictionary or empty dictionary.
 
         """
-        from unraid_api.models import Server
-
         query_str = """
             query {
                 server {
@@ -5445,8 +5443,19 @@ class UnraidClient:
             }
         """
         result = await self.query(query_str)
-        s = result.get("server")
-        return Server(**s) if s else None
+        return dict(result.get("server") or {})
+
+    async def typed_get_server(self) -> Server | None:
+        """Get current server identity as a typed Pydantic model.
+
+        Returns:
+            Server model instance or None.
+
+        """
+        from unraid_api.models import Server
+
+        data = await self.get_server()
+        return Server(**data) if data else None
 
     async def update_server_identity(
         self,
@@ -5660,7 +5669,7 @@ class UnraidClient:
         from unraid_api.models import PluginInstallEvent
 
         subscription = """
-            subscription PluginInstallUpdates($operationId: String!) {
+            subscription PluginInstallUpdates($operationId: ID!) {
                 pluginInstallUpdates(operationId: $operationId) {
                     operationId status output timestamp
                 }

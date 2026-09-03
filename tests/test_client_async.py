@@ -7631,6 +7631,22 @@ class TestServerMethods:
                 "http://unraid.test/graphql",
                 payload={
                     "data": {
+                        "server": {
+                            "id": "server:1",
+                            "name": "Tower",
+                            "status": "ONLINE",
+                        }
+                    }
+                },
+            )
+            m.post(
+                "http://unraid.test/graphql",
+                payload={"data": {"server": None}},
+            )
+            m.post(
+                "http://unraid.test/graphql",
+                payload={
+                    "data": {
                         "updateServerIdentity": {
                             "id": "server:1",
                             "name": "Tower-Updated",
@@ -7639,7 +7655,6 @@ class TestServerMethods:
                     }
                 },
             )
-
             m.post(
                 "http://unraid.test/graphql",
                 payload={
@@ -7664,9 +7679,16 @@ class TestServerMethods:
                 assert len(typed_servers) == 1
                 assert typed_servers[0].name == "Tower"
 
-                server = await client.get_server()
-                assert server is not None
-                assert server.id == "server:1"
+                server_raw = await client.get_server()
+                assert isinstance(server_raw, dict)
+                assert server_raw["id"] == "server:1"
+
+                typed_server = await client.typed_get_server()
+                assert typed_server is not None
+                assert typed_server.id == "server:1"
+
+                none_server = await client.typed_get_server()
+                assert none_server is None
 
                 updated = await client.update_server_identity(
                     name="Tower-Updated",
