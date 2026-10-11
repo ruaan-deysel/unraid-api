@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Configured Codecov GitHub Actions workflow for tokenless coverage uploads
+
 ## [1.13.1] - 2026-09-03
 
 ### Fixed
