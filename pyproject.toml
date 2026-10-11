@@ -53,10 +53,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/ruaan-deysel/unraid-api"
-Documentation = "https://github.com/ruaan-deysel/unraid-api#readme"
-Repository = "https://github.com/ruaan-deysel/unraid-api.git"
-Issues = "https://github.com/ruaan-deysel/unraid-api/issues"
+Homepage = "https://github.com/tinkerologie/unraid-api"
+Documentation = "https://github.com/tinkerologie/unraid-api#readme"
+Repository = "https://github.com/tinkerologie/unraid-api.git"
+Issues = "https://github.com/tinkerologie/unraid-api/issues"
 
 [tool.hatch.build.targets.sdist]
 include = [
