@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Docker Container Autostart Input Type Name** — Fixed GraphQL validation error (`Unknown type "AutostartConfigurationEntryInput"`) in `update_container_autostart()` by using the correct schema input object type name `[DockerAutostartEntryInput!]!` ([#91](https://github.com/ruaan-deysel/unraid-api/issues/91)).
+- **Docker Container Autostart Input Type Name** — Fixed GraphQL validation error (`Unknown type "AutostartConfigurationEntryInput"`) in `update_container_autostart()` by using the correct schema input object type name `[DockerAutostartEntryInput!]!` ([#91](https://github.com/tinkerologie/unraid-api/issues/91)).
 
 ## [1.13.0] - 2026-09-02
 
@@ -46,7 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   receive clean values regardless of how the model is built. Verified against a
   live server: round-tripping the corruption through all 8 real container IDs
   recovers the original, server-matching IDs.
-  ([#71](https://github.com/ruaan-deysel/unraid-api/issues/71))
+  ([#71](https://github.com/tinkerologie/unraid-api/issues/71))
 
 ## [1.12.0] - 2026-06-10
 
@@ -61,7 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ports`/`templatePorts`/`hostConfig`/`tailscaleStatus` subselections.
   Validated against a live Unraid 7.3.1 server: 0.08 s vs 2.5 s for the full
   query with 17 containers.
-  ([#69](https://github.com/ruaan-deysel/unraid-api/issues/69))
+  ([#69](https://github.com/tinkerologie/unraid-api/issues/69))
 - **Network metrics (API 4.35.0)** — `get_network_metrics()` returns
   read-only per-interface throughput, packet, error, and dropped counters
   (`metrics.network`); `subscribe_network_metrics()` streams the same data
@@ -133,7 +133,7 @@ versions are unchanged — older servers keep working.
 
 ### Added
 
-- **`get_system_metrics_safe()` method** — Identical to `get_system_metrics()` but omits the `metrics.temperature` GraphQL block. The Unraid temperature resolver triggers smartctl reads that wake sleeping/standby disks; this method is safe for frequent polling (e.g. every 30 seconds) without disrupting disk power management. CPU temperature remains available via `info.cpu.packages.temp`. Returns `SystemMetrics` with `temperature=None`. ([#50](https://github.com/ruaan-deysel/unraid-api/issues/50))
+- **`get_system_metrics_safe()` method** — Identical to `get_system_metrics()` but omits the `metrics.temperature` GraphQL block. The Unraid temperature resolver triggers smartctl reads that wake sleeping/standby disks; this method is safe for frequent polling (e.g. every 30 seconds) without disrupting disk power management. CPU temperature remains available via `info.cpu.packages.temp`. Returns `SystemMetrics` with `temperature=None`. ([#50](https://github.com/tinkerologie/unraid-api/issues/50))
 
 ## [1.9.1] - 2026-04-12
 
@@ -214,12 +214,12 @@ versions are unchanged — older servers keep working.
 - **PhysicalDisk extended fields** — Added `serialNum`, `firmwareRevision`, and `partitions` (list of `DiskPartition`) to `PhysicalDisk` model and `get_physical_disks()` query
 - **get_metrics() extended fields** — Now includes `active` and `buffcache` in memory query, and `percentNice`, `percentIrq`, `percentGuest`, `percentSteal` in per-CPU query
 - **New exports** — `DiskPartition`, `MemoryUtilization`, and `NotificationOverviewCounts` are now exported from `unraid_api` for consumer type access
-- **Temperature monitoring** ([#37](https://github.com/ruaan-deysel/unraid-api/issues/37)) — Full temperature sensor support via `get_temperature_metrics()` query and `subscribe_temperature_metrics()` subscription
+- **Temperature monitoring** ([#37](https://github.com/tinkerologie/unraid-api/issues/37)) — Full temperature sensor support via `get_temperature_metrics()` query and `subscribe_temperature_metrics()` subscription
   - New models: `TemperatureMetrics`, `TemperatureSensor`, `TemperatureReading`, `TemperatureSummary`, `TemperatureSensorSummary`
   - New enums: `SensorType` (CPU_PACKAGE, CPU_CORE, DISK, NVME, CUSTOM), `TemperatureUnit` (CELSIUS, FAHRENHEIT), `TemperatureStatus` (NORMAL, WARNING, CRITICAL, UNKNOWN)
   - Helper properties: `TemperatureSensor.temperature`, `is_critical`, `is_warning`; `TemperatureMetrics.disk_sensors`, `nvme_sensors`, `cpu_sensors`, `get_sensors_by_type()`
   - Temperature data also included in `SystemMetrics.from_response()` via `temperature` field
-- **Missing memory fields** ([#38](https://github.com/ruaan-deysel/unraid-api/issues/38)) — Added `active`, `buffcache`, and `swapFree` to `MemoryUtilization` model and `memory_active`, `memory_buffcache`, `swap_free` to `SystemMetrics`
+- **Missing memory fields** ([#38](https://github.com/tinkerologie/unraid-api/issues/38)) — Added `active`, `buffcache`, and `swapFree` to `MemoryUtilization` model and `memory_active`, `memory_buffcache`, `swap_free` to `SystemMetrics`
   - `get_system_metrics()` query now fetches these additional memory fields
 
 ## [1.7.1] - 2026-03-21
@@ -228,7 +228,7 @@ versions are unchanged — older servers keep working.
 
 - **Resolved all CodeQL clear-text logging alerts (#2–#14)** — API key no longer appears in any method that contains logging calls; auth headers are pre-computed once in `__init__` via `self._auth_headers` and referenced by name elsewhere
 - **Redacted API key from test script output** — `scripts/unraid-api-client.py` no longer prints any portion of the API key
-- **Fixed all 5 notification mutation methods** sending incorrectly nested GraphQL mutations ([#24](https://github.com/ruaan-deysel/unraid-api/issues/24))
+- **Fixed all 5 notification mutation methods** sending incorrectly nested GraphQL mutations ([#24](https://github.com/tinkerologie/unraid-api/issues/24))
   - `archive_notification()` — uses root-level `archiveNotification` instead of `notifications { archive }`
   - `unarchive_notification()` — uses root-level `unreadNotification` instead of `notifications { unread }`
   - `delete_notification()` — uses root-level `deleteNotification` with required `type` parameter instead of `notifications { delete }`
@@ -496,13 +496,13 @@ Return dict/list for flexible access:
 - `PhysicalDisk`
 - `Notification`, `NotificationOverview`
 
-[Unreleased]: https://github.com/ruaan-deysel/unraid-api/compare/v1.8.0...HEAD
-[1.8.0]: https://github.com/ruaan-deysel/unraid-api/compare/v1.7.1...v1.8.0
-[1.7.1]: https://github.com/ruaan-deysel/unraid-api/compare/v1.7.0...v1.7.1
-[1.7.0]: https://github.com/ruaan-deysel/unraid-api/compare/v1.6.0...v1.7.0
-[1.6.0]: https://github.com/ruaan-deysel/unraid-api/compare/v1.5.0...v1.6.0
-[1.5.0]: https://github.com/ruaan-deysel/unraid-api/compare/v1.4.0...v1.5.0
-[1.4.0]: https://github.com/ruaan-deysel/unraid-api/compare/v1.3.1...v1.4.0
-[1.3.1]: https://github.com/ruaan-deysel/unraid-api/compare/v1.3.0...v1.3.1
-[1.3.0]: https://github.com/ruaan-deysel/unraid-api/compare/v1.2.2...v1.3.0
-[1.2.2]: https://github.com/ruaan-deysel/unraid-api/releases/tag/v1.2.2
+[Unreleased]: https://github.com/tinkerologie/unraid-api/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/tinkerologie/unraid-api/compare/v1.7.1...v1.8.0
+[1.7.1]: https://github.com/tinkerologie/unraid-api/compare/v1.7.0...v1.7.1
+[1.7.0]: https://github.com/tinkerologie/unraid-api/compare/v1.6.0...v1.7.0
+[1.6.0]: https://github.com/tinkerologie/unraid-api/compare/v1.5.0...v1.6.0
+[1.5.0]: https://github.com/tinkerologie/unraid-api/compare/v1.4.0...v1.5.0
+[1.4.0]: https://github.com/tinkerologie/unraid-api/compare/v1.3.1...v1.4.0
+[1.3.1]: https://github.com/tinkerologie/unraid-api/compare/v1.3.0...v1.3.1
+[1.3.0]: https://github.com/tinkerologie/unraid-api/compare/v1.2.2...v1.3.0
+[1.2.2]: https://github.com/tinkerologie/unraid-api/releases/tag/v1.2.2
