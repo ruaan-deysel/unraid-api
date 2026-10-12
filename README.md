@@ -2,7 +2,7 @@
 
 [![PyPI version](https://badge.fury.io/py/unraid-api.svg)](https://badge.fury.io/py/unraid-api)
 [![Python versions](https://img.shields.io/pypi/pyversions/unraid-api.svg)](https://pypi.org/project/unraid-api/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![codecov](https://codecov.io/gh/tinkerologie/unraid-api/graph/badge.svg?token=QY61Z24GNZ)](https://codecov.io/gh/tinkerologie/unraid-api)
 
 An async Python client library for the Unraid GraphQL API.
@@ -389,7 +389,7 @@ uv run mypy src/
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+Apache License 2.0 - see [LICENSE](LICENSE) for details. Earlier releases were MIT licensed; see [NOTICE](NOTICE).
 
 ## Contributing
 
