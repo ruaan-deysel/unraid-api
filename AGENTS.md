@@ -21,7 +21,7 @@ All AI coding assistants (Claude Code, Gemini, GitHub Copilot, Cursor, Roo, Devi
 4. Branch Discipline: Always create and work on a dedicated branch (`feat/<issue-id>-<description>` or `fix/<issue-id>-<description>`). NEVER commit directly to `main`.
 5. Documentation & Changelog: Update `CHANGELOG.md` under `## [Unreleased]` for any user-facing or architectural changes.
 6. Local Verification: Run all test, lint, format, and typecheck commands locally before committing. All tests must pass with zero errors and zero warnings.
-7. PR Template Completion: Always use `.github/PULL_REQUEST_TEMPLATE.md`. Complete all fields, link the issue using `Fixes #<id>` or `Closes #<id>`, and check all Pre-Submission Governance boxes with real terminal output.
+7. PR Template Completion: Always use `.github/PULL_REQUEST_TEMPLATE.md`. Complete all fields, link the issue using `Closes #<id>` or `Fixes #<id>` when the PR fully resolves it, or `Part of #<id>` for partial work, and check all Pre-Submission Governance boxes with real terminal output.
 8. Draft PR First: ALWAYS open pull requests as DRAFT (`gh pr create --draft`).
 9. CI Verification: Wait for CI workflows to run on the draft PR and verify that all status checks pass.
 10. Ready for Review: Only mark the PR as ready for review (`gh pr ready`) once all checks pass and all due diligence is verified.

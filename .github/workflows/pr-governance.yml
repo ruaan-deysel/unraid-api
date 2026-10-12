@@ -196,6 +196,16 @@ jobs:
             const isExplicitNone =
               /^(?:none|n\/a|not applicable|no issue|standalone)\b/i.test(relatedIssuesClean);
 
+            // "None" is reserved for maintainer housekeeping (CI, docs, dependency
+            // updates). Contributors without write access must link an issue.
+            const authorAssociation = context.payload.pull_request.author_association;
+            const isMaintainer = ["OWNER", "MEMBER", "COLLABORATOR"].includes(authorAssociation);
+            if (isExplicitNone && !isMaintainer) {
+              errors.push(
+                'Contributor PRs must link an issue in "Related Issues", for example `Closes #123` or `Part of #123`. "None" is reserved for maintainer housekeeping; open an issue with the bug or enhancement template first.',
+              );
+            }
+
             if (!isExplicitNone && relatedIssuesClean) {
               const issueRefRegex =
                 /\b(?:part of|fix(?:e[sd])?|close[sd]?|resolve[sd]?|related to|addresses?|implements?)[:]??\s+(?:https?:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/issues\/(\d+)|([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#(\d+))/gi;
