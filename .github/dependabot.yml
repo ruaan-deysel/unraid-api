@@ -1,32 +1,40 @@
+# Dependabot (tinkerologie standard: see STANDARDS.md in tinkerologie/.github)
 version: 2
 
 updates:
   # Python / uv dependencies
-  - package-ecosystem: "uv"
-    directory: "/"
+  - package-ecosystem: uv
+    directory: /
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: weekly
+      day: monday
     open-pull-requests-limit: 10
+    labels:
+      - dependencies
+    commit-message:
+      prefix: chore(deps)
     groups:
       dev-dependencies:
         patterns:
-          - "pytest*"
-          - "ruff"
-          - "mypy"
-          - "pre-commit"
-          - "aiointercept"
-    labels:
-      - "dependencies"
-      - "security"
-
-  # GitHub Actions
-  - package-ecosystem: "github-actions"
-    directory: "/"
+          - pytest*
+          - ruff
+          - mypy
+          - pre-commit
+          - aiointercept
+  - package-ecosystem: github-actions
+    directory: /
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: weekly
+      day: monday
     open-pull-requests-limit: 10
     labels:
-      - "dependencies"
-      - "github-actions"
+      - dependencies
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      github-actions-minor-patch:
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch
