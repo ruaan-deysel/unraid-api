@@ -137,8 +137,9 @@ These rules apply to every contributor, including AI coding agents. The full org
    a maintainer removed.
 2. **Link the issue.** In the PR's **Related Issues** section, write `Closes #<number>` (or `Fixes`
    or `Resolves`) when the PR completely resolves the issue; these keywords close it on merge. Use
-   `Part of #<number>` or `Related to #<number>` for partial work. `None` is only for maintainer
-   housekeeping such as CI, documentation, or dependency updates; contributor changes need an issue.
+   `Part of #<number>` or `Related to #<number>` for partial work. The linked issue must exist in
+   this repository. Only maintainers with write access may write `None`, for housekeeping such as CI,
+   documentation, or dependency updates; PR governance rejects `None` from everyone else.
 3. **One change at a time.** Contributors without write access can have at most 2 open, non-draft
    pull requests here. GitHub enforces this limit, and draft pull requests do not count toward it.
    Do not open PRs that edit the same files as another open PR, such as `CHANGELOG.md`,
