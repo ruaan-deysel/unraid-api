@@ -35,8 +35,8 @@
 
 ## Related Issues
 
-<!-- Link to related issues, or specify "None" for self-contained changes -->
-<!-- Examples: Fixes #123, Closes https://github.com/..., Related to #456, Part of #789, or None -->
+<!-- Link the issue this PR resolves (Closes #123) or contributes to (Part of #123). "None" is only for maintainers with write access, for housekeeping. -->
+<!-- Examples: Fixes #123, Closes https://github.com/..., Related to #456, Part of #789, or None (maintainers only) -->
 
 Fixes #
 
@@ -94,7 +94,7 @@ Fixes #
 <!-- Ensure you've completed all required items before submitting -->
 
 - [ ] I have updated CHANGELOG.md under [Unreleased] with details of this change
-- [ ] I linked related issues or noted "None" in **Related Issues**
+- [ ] I linked the related issue in **Related Issues** (only maintainers may note "None", for housekeeping)
 - [ ] I completed all required sections in this template and removed placeholder-only content
 - [ ] My code follows the project's coding standards and Python best practices
 - [ ] I have performed a self-review of my own code
